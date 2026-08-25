@@ -1,0 +1,22 @@
+{
+  "entries": 197860,
+  "format": "language-input-glosspack-v1",
+  "language": "en",
+  "output": {
+    "file": "en.tsv",
+    "sha256": "FF211A904BB7BD3F67B9EF5D3A1CD265CEDF1C505F43239B1786EFF374645377"
+  },
+  "parsed_source_entries": 124925,
+  "skipped_source_lines": 0,
+  "source": {
+    "date": "2026-08-24T05:05:01Z",
+    "declared_entries": "124925",
+    "license": "CC-BY-SA-4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "name": "CC-CEDICT",
+    "publisher": "MDBG",
+    "sha256": "1ACC073BCFE431C6002901ED8D19A16E32C4AD8D54F85BD746C4A4F50A2C589D",
+    "subversion": "0",
+    "version": "1"
+  }
+}

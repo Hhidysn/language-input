@@ -27,6 +27,18 @@ Name "小狼毫 ${WEASEL_VERSION}"
 ; The file to write
 OutFile "archives\weasel-${PRODUCT_VERSION}-installer.exe"
 
+; When signing parameters are supplied by the release build, sign both the
+; generated installer and the temporary uninstaller before NSIS embeds it.
+; Keeping the certificate and SDK path outside this source file makes the
+; script usable by other builders and avoids committing private key details.
+!ifdef LANGUAGE_INPUT_SIGNTOOL
+!ifndef LANGUAGE_INPUT_SIGN_CERT_SHA1
+!error "LANGUAGE_INPUT_SIGN_CERT_SHA1 is required when signing is enabled"
+!endif
+!finalize '"${LANGUAGE_INPUT_SIGNTOOL}" sign /sha1 "${LANGUAGE_INPUT_SIGN_CERT_SHA1}" /s My /fd SHA256 /d "Language Input ${PRODUCT_VERSION} installer" "%1"' = 0
+!uninstfinalize '"${LANGUAGE_INPUT_SIGNTOOL}" sign /sha1 "${LANGUAGE_INPUT_SIGN_CERT_SHA1}" /s My /fd SHA256 /d "Language Input ${PRODUCT_VERSION} uninstaller" "%1"' = 0
+!endif
+
 VIProductVersion "${WEASEL_VERSION}.${WEASEL_BUILD}"
 VIAddVersionKey /LANG=2052 "ProductName" "小狼毫"
 VIAddVersionKey /LANG=2052 "Comments" "Powered by RIME | 中州韻輸入法引擎"
@@ -178,8 +190,17 @@ call_uninstaller:
   ; Remove files and uninstaller
   Delete  "$R1\data\opencc\*.*"
   Delete  "$R1\data\preview\*.*"
+  Delete  "$R1\data\language_input\gloss\*.*"
+  Delete  "$R1\data\lua\language_input\*.*"
+  Delete  "$R1\data\licenses\language-input\*.*"
   Delete  "$R1\data\*.*"
   Delete  "$R1\*.*"
+  RMDir   "$R1\data\language_input\gloss"
+  RMDir   "$R1\data\language_input"
+  RMDir   "$R1\data\lua\language_input"
+  RMDir   "$R1\data\lua"
+  RMDir   "$R1\data\licenses\language-input"
+  RMDir   "$R1\data\licenses"
   RMDir   "$R1\data\opencc"
   RMDir   "$R1\data\preview"
   RMDir   "$R1\data"
@@ -226,6 +247,8 @@ Section "Weasel"
 program_files:
   File "LICENSE.txt"
   File "README.txt"
+  File "LANGUAGE-INPUT-README.txt"
+  File "LANGUAGE-INPUT-PRIVACY.txt"
   File "7-zip-license.txt"
   File "7z.dll"
   File "7z.exe"
@@ -300,6 +323,14 @@ program_files:
   ; images
   SetOutPath $INSTDIR\data\preview
   File "data\preview\*.png"
+  ; Language Input local gloss filter, deterministic GlossPack and notices
+  SetOutPath $INSTDIR\data\lua\language_input
+  File "data\lua\language_input\gloss_filter.lua"
+  SetOutPath $INSTDIR\data\language_input\gloss
+  File "data\language_input\gloss\en.tsv"
+  File "data\language_input\gloss\en.manifest.json"
+  SetOutPath $INSTDIR\data\licenses\language-input
+  File "data\licenses\language-input\*.txt"
 
   SetOutPath $INSTDIR
 
@@ -368,7 +399,7 @@ SectionEnd
 Section "Start Menu Shortcuts"
   SetShellVarContext all
   CreateDirectory "$SMPROGRAMS\$(DISPLAYNAME)"
-  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORMANUAL).lnk" "$INSTDIR\README.txt"
+  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORMANUAL).lnk" "$INSTDIR\LANGUAGE-INPUT-README.txt"
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETTING).lnk" "$INSTDIR\WeaselDeployer.exe" "" "$SYSDIR\shell32.dll" 21
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORDICT).lnk" "$INSTDIR\WeaselDeployer.exe" "/dict" "$SYSDIR\shell32.dll" 6
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSYNC).lnk" "$INSTDIR\WeaselDeployer.exe" "/sync" "$SYSDIR\shell32.dll" 26
@@ -407,8 +438,17 @@ Section "Uninstall"
   SetOutPath $TEMP
   Delete  "$INSTDIR\data\opencc\*.*"
   Delete  "$INSTDIR\data\preview\*.*"
+  Delete  "$INSTDIR\data\language_input\gloss\*.*"
+  Delete  "$INSTDIR\data\lua\language_input\*.*"
+  Delete  "$INSTDIR\data\licenses\language-input\*.*"
   Delete  "$INSTDIR\data\*.*"
   Delete  "$INSTDIR\*.*"
+  RMDir  "$INSTDIR\data\language_input\gloss"
+  RMDir  "$INSTDIR\data\language_input"
+  RMDir  "$INSTDIR\data\lua\language_input"
+  RMDir  "$INSTDIR\data\lua"
+  RMDir  "$INSTDIR\data\licenses\language-input"
+  RMDir  "$INSTDIR\data\licenses"
   RMDir  "$INSTDIR\data\opencc"
   RMDir  "$INSTDIR\data\preview"
   RMDir  "$INSTDIR\data"

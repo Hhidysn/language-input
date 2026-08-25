@@ -1,4 +1,6 @@
 .cache
+__pycache__/
+*.py[cod]
 .clangd
 .xmake
 build
@@ -27,13 +29,20 @@ compile_commands.json
 /output/data/essay.txt
 /output/data/opencc/
 /output/data/*.yaml
+/output/data/language_input/
+/output/data/lua/language_input/
+/output/data/licenses/language-input/
 /output/archives
 /include/glog
 /include/rime*.h
 /ipch
 env.bat
 weasel.props
+/installation.yaml
+/x64/
+/test/TestResponseParser/x64/
 *.log
+*.obj
 *.user
 *.suo
 *.sdf

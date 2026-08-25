@@ -15,6 +15,12 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="LanguageInputRemote.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="LanguageInputSpeech.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="RimeWithWeasel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -26,6 +32,12 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="LanguageInputRemote.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="LanguageInputSpeech.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\include\RimeWithWeasel.h">
       <Filter>Header Files</Filter>
     </ClInclude>

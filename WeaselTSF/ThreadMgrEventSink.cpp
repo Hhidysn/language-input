@@ -13,6 +13,11 @@ STDAPI WeaselTSF::OnSetFocus(ITfDocumentMgr* pDocMgrFocus,
                              ITfDocumentMgr* pDocMgrPrevFocus) {
   _InitTextEditSink(pDocMgrFocus);
 
+  com_ptr<ITfContext> focus_context;
+  if (pDocMgrFocus)
+    pDocMgrFocus->GetTop(&focus_context);
+  _UpdateClientCapabilities(focus_context, true);
+
   com_ptr<ITfDocumentMgr> pCandidateListDocumentMgr;
   com_ptr<ITfContext> pTfContext = _GetUIContextDocument();
   if ((nullptr != pTfContext) &&
@@ -28,10 +33,12 @@ STDAPI WeaselTSF::OnSetFocus(ITfDocumentMgr* pDocMgrFocus,
 }
 
 STDAPI WeaselTSF::OnPushContext(ITfContext* pContext) {
+  _UpdateClientCapabilities(pContext, true);
   return S_OK;
 }
 
 STDAPI WeaselTSF::OnPopContext(ITfContext* pContext) {
+  _UpdateClientCapabilities(nullptr, true);
   return S_OK;
 }
 

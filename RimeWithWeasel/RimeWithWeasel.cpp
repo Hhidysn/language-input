@@ -4,6 +4,8 @@
 #include <StringAlgorithm.hpp>
 #include <WeaselConstants.h>
 #include <WeaselUtility.h>
+#include "LanguageInputRemote.h"
+#include "LanguageInputSpeech.h"
 #include <boost/algorithm/string.hpp>
 #include <vector>
 
@@ -82,7 +84,13 @@ RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
       m_current_dark_mode(false),
       m_global_ascii_mode(false),
       m_show_notifications_time(1200),
-      _UpdateUICallback(NULL) {
+      _UpdateUICallback(NULL),
+      m_speech(std::make_unique<weasel::language_input::SpeechService>()),
+      m_remote_gloss(std::make_unique<
+                     weasel::language_input::RemoteGlossService>(
+          weasel::language_input::LoadRemoteGlossConfig(
+              WeaselUserDataPath() / L"language_input" /
+              L"remote_cache_v1.json"))) {
   rime_api = rime_get_api();
   assert(rime_api);
   m_pid = GetCurrentProcessId();
@@ -189,6 +197,7 @@ void RimeWithWeaselHandler::Initialize() {
 }
 
 void RimeWithWeaselHandler::Finalize() {
+  m_remote_gloss->SuspendAllSessions();
   m_active_session = 0;
   m_disabled = true;
   m_session_status_map.clear();
@@ -230,6 +239,8 @@ DWORD RimeWithWeaselHandler::AddSession(LPWSTR buffer, EatLine eat) {
   SessionStatus& session_status = new_session_status(ipc_id);
   session_status.style = m_base_style;
   session_status.session_id = session_id;
+  m_remote_gloss->SetSessionSensitive(session_id, true);
+  rime_api->set_option(session_id, "language_input_sensitive", True);
   _ReadClientInfo(ipc_id, buffer);
 
   RIME_STRUCT(RimeStatus, status);
@@ -262,6 +273,7 @@ DWORD RimeWithWeaselHandler::RemoveSession(WeaselSessionId ipc_id) {
   if (m_disabled)
     return 0;
   DLOG(INFO) << "Remove session: session_id = " << to_session_id(ipc_id);
+  m_remote_gloss->RemoveSession(to_session_id(ipc_id));
   // TODO: force committing? otherwise current composition would be lost
   rime_api->destroy_session(to_session_id(ipc_id));
   m_session_status_map.erase(ipc_id);
@@ -311,8 +323,41 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   if (m_disabled)
     return FALSE;
   RimeSessionId session_id = to_session_id(ipc_id);
+  std::optional<weasel::language_input::GlossSpeech> pending_speech;
+  auto candidate_index =
+      weasel::language_input::CandidateIndexForSpeech(keyEvent);
+  if (candidate_index &&
+      rime_api->get_option(session_id, "language_input_speech") &&
+      !rime_api->get_option(session_id, "language_input_sensitive")) {
+    RIME_STRUCT(RimeContext, context);
+    if (rime_api->get_context(session_id, &context)) {
+      if (*candidate_index <
+          static_cast<size_t>(context.menu.num_candidates)) {
+        const RimeCandidate& candidate =
+            context.menu.candidates[*candidate_index];
+        const char* comment = candidate.comment;
+        if (comment)
+          pending_speech =
+              weasel::language_input::ParseGlossForSpeech(comment);
+        if (!pending_speech && candidate.text &&
+            rime_api->get_option(session_id, "language_input_gloss") &&
+            rime_api->get_option(session_id, "language_input_remote")) {
+          auto remote = m_remote_gloss->Lookup(session_id, candidate.text);
+          if (remote)
+            pending_speech = weasel::language_input::ParseGlossForSpeech(
+                remote->MarkedComment());
+        }
+      }
+      rime_api->free_context(&context);
+    }
+  }
   Bool handled = rime_api->process_key(session_id, keyEvent.keycode,
                                        expand_ibus_modifier(keyEvent.mask));
+  if (handled && pending_speech &&
+      rime_api->get_option(session_id, "language_input_speech") &&
+      !rime_api->get_option(session_id, "language_input_sensitive")) {
+    m_speech->Speak(*pending_speech);
+  }
   // vim_mode when keydown only
   if (!handled && !(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
     bool isVimBackInCommandMode =
@@ -390,6 +435,16 @@ void RimeWithWeaselHandler::FocusIn(DWORD client_caps, WeaselSessionId ipc_id) {
              << ", client_caps = " << client_caps;
   if (m_disabled)
     return;
+  RimeSessionId session_id = to_session_id(ipc_id);
+  bool sensitive = (client_caps & weasel::CLIENT_CAP_SENSITIVE) != 0;
+  if (sensitive)
+    m_remote_gloss->SetSessionSensitive(session_id, true);
+  rime_api->set_option(session_id, "language_input_sensitive",
+                       Bool(sensitive));
+  if (!sensitive)
+    m_remote_gloss->SetSessionSensitive(session_id, false);
+  if (sensitive)
+    m_speech->Stop();
   _UpdateUI(ipc_id);
   m_active_session = ipc_id;
 }
@@ -398,6 +453,12 @@ void RimeWithWeaselHandler::FocusOut(DWORD param, WeaselSessionId ipc_id) {
   DLOG(INFO) << "Focus out: ipc_id = " << ipc_id;
   if (m_ui)
     m_ui->Hide();
+  if (!m_disabled && FindSession(ipc_id)) {
+    m_remote_gloss->SetSessionSensitive(to_session_id(ipc_id), true);
+    rime_api->set_option(to_session_id(ipc_id), "language_input_sensitive",
+                         True);
+  }
+  m_speech->Stop();
   m_active_session = 0;
 }
 
@@ -496,16 +557,34 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
 }
 
 void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
-                                              RimeContext& ctx) {
+                                              RimeContext& ctx,
+                                              RimeSessionId session_id) {
   cinfo.candies.resize(ctx.menu.num_candidates);
   cinfo.comments.resize(ctx.menu.num_candidates);
   cinfo.labels.resize(ctx.menu.num_candidates);
+  const bool remote_enabled =
+      m_remote_gloss->available() &&
+      rime_api->get_option(session_id, "language_input_gloss") &&
+      rime_api->get_option(session_id, "language_input_remote") &&
+      !rime_api->get_option(session_id, "language_input_sensitive");
+  std::vector<std::string> remote_misses;
   for (int i = 0; i < ctx.menu.num_candidates; ++i) {
-    cinfo.candies[i].str = escape_string(u8tow(ctx.menu.candidates[i].text));
-    if (ctx.menu.candidates[i].comment) {
-      cinfo.comments[i].str =
-          escape_string(u8tow(ctx.menu.candidates[i].comment));
+    const RimeCandidate& candidate = ctx.menu.candidates[i];
+    cinfo.candies[i].str = escape_string(u8tow(candidate.text));
+    std::string comment = candidate.comment ? candidate.comment : "";
+    if (remote_enabled && candidate.text &&
+        !weasel::language_input::ParseGlossForSpeech(comment)) {
+      auto remote = m_remote_gloss->Lookup(session_id, candidate.text);
+      if (remote) {
+        if (!comment.empty())
+          comment += "  ";
+        comment += remote->MarkedComment();
+      } else {
+        remote_misses.emplace_back(candidate.text);
+      }
     }
+    if (!comment.empty())
+      cinfo.comments[i].str = escape_string(u8tow(comment));
     if (RIME_STRUCT_HAS_MEMBER(ctx, ctx.select_labels) && ctx.select_labels) {
       cinfo.labels[i].str = escape_string(u8tow(ctx.select_labels[i]));
     } else if (ctx.menu.select_keys) {
@@ -518,6 +597,8 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
   cinfo.highlighted = ctx.menu.highlighted_candidate_index;
   cinfo.currentPage = ctx.menu.page_no;
   cinfo.is_last_page = ctx.menu.is_last_page;
+  if (remote_enabled && !remote_misses.empty())
+    m_remote_gloss->QueueMissing(session_id, remote_misses);
 }
 
 void RimeWithWeaselHandler::StartMaintenance() {
@@ -866,7 +947,7 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
           break;
         case UIStyle::PREVIEW_ALL:
           CandidateInfo cinfo;
-          _GetCandidateInfo(cinfo, ctx);
+          _GetCandidateInfo(cinfo, ctx, session_id);
           std::string topush = std::string("ctx.preedit=") +
                                escape_string<char>(ctx.composition.preedit) +
                                "  [";
@@ -910,7 +991,7 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
       CandidateInfo cinfo;
       std::wstringstream ss;
       boost::archive::text_woarchive oa(ss);
-      _GetCandidateInfo(cinfo, ctx);
+      _GetCandidateInfo(cinfo, ctx, session_id);
 
       oa << cinfo;
 
@@ -1471,7 +1552,7 @@ void RimeWithWeaselHandler::_GetContext(Context& weasel_context,
     }
     if (ctx.menu.num_candidates) {
       CandidateInfo& cinfo(weasel_context.cinfo);
-      _GetCandidateInfo(cinfo, ctx);
+      _GetCandidateInfo(cinfo, ctx, session_id);
     }
     rime_api->free_context(&ctx);
   }

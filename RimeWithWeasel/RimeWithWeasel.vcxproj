@@ -260,6 +260,8 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="LanguageInputRemote.cpp" />
+    <ClCompile Include="LanguageInputSpeech.cpp" />
     <ClCompile Include="RimeWithWeasel.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -274,6 +276,8 @@
     <ClCompile Include="WeaselUtility.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="LanguageInputRemote.h" />
+    <ClInclude Include="LanguageInputSpeech.h" />
     <ClInclude Include="..\include\RimeWithWeasel.h" />
     <ClInclude Include="..\include\WeaselUtility.h" />
     <ClInclude Include="stdafx.h" />

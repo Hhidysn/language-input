@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <strsafe.h>
 #include <ResponseParser.h>
+#include <SensitiveInput.h>
 #include <StringAlgorithm.hpp>
 #include "WeaselIME.h"
 
@@ -93,7 +94,10 @@ succeeding IPC messages might not be delivered.");
 */
 
 WeaselIME::WeaselIME(HIMC hIMC)
-    : m_hIMC(hIMC), m_composing(false), m_preferCandidatePos(false) {
+    : m_hIMC(hIMC),
+      m_composing(false),
+      m_preferCandidatePos(false),
+      m_client_caps(MAXDWORD) {
   WCHAR path[MAX_PATH];
   WCHAR fname[_MAX_FNAME];
   WCHAR ext[_MAX_EXT];
@@ -213,6 +217,7 @@ LRESULT WeaselIME::OnIMESelect(BOOL fSelect) {
     // initialize weasel client
     m_client.Connect(NULL);
     m_client.StartSession();
+    m_client_caps = MAXDWORD;
 
     return _Initialize();
   } else {
@@ -226,6 +231,12 @@ LRESULT WeaselIME::OnIMEFocus(BOOL fFocus) {
   EZDBGONLYLOGGERPRINT("On IME focus: %d, HIMC = 0x%x", fFocus, m_hIMC);
   LPINPUTCONTEXT lpIMC = ImmLockIMC(m_hIMC);
   if (!lpIMC) {
+    if (fFocus) {
+      _UpdateClientCapabilities(nullptr, true);
+    } else {
+      m_client.FocusOut();
+      m_client_caps = MAXDWORD;
+    }
     return 0;
   }
   if (fFocus) {
@@ -235,9 +246,10 @@ LRESULT WeaselIME::OnIMEFocus(BOOL fFocus) {
       ScreenToClient(lpIMC->hWnd, &lpIMC->cfCompForm.ptCurrentPos);
       lpIMC->fdwInit |= INIT_COMPFORM;
     }
-    m_client.FocusIn();
+    _UpdateClientCapabilities(lpIMC, true);
   } else {
     m_client.FocusOut();
+    m_client_caps = MAXDWORD;
   }
   ImmUnlockIMC(m_hIMC);
 
@@ -368,7 +380,13 @@ BOOL WeaselIME::ProcessKeyEvent(UINT vKey,
   if (!m_client.Echo()) {
     m_client.Connect(NULL);
     m_client.StartSession();
+    m_client_caps = MAXDWORD;
   }
+
+  LPINPUTCONTEXT lpIMC = ImmLockIMC(m_hIMC);
+  _UpdateClientCapabilities(lpIMC);
+  if (lpIMC)
+    ImmUnlockIMC(m_hIMC);
 
   weasel::KeyEvent ke;
   if (!ConvertKeyEvent(vKey, kinfo, lpbKeyState, ke)) {
@@ -563,4 +581,24 @@ void WeaselIME::_UpdateInputPosition(LPINPUTCONTEXT lpIMC, POINT pt) {
   SetRect(&rc, pt.x, pt.y, pt.x + width, pt.y + height);
   EZDBGONLYLOGGERPRINT("Updating input position: (%d, %d)", pt.x, pt.y);
   m_client.UpdateInputPosition(rc);
+}
+
+DWORD WeaselIME::_GetClientCapabilities(LPINPUTCONTEXT lpIMC) const {
+  if (!lpIMC)
+    return weasel::CLIENT_CAP_SENSITIVE;
+  HWND window = GetFocus();
+  if (!window)
+    window = lpIMC->hWnd;
+  bool sensitive = weasel::IsConventionalPasswordControl(window);
+  if (!sensitive && window != lpIMC->hWnd)
+    sensitive = weasel::IsConventionalPasswordControl(lpIMC->hWnd);
+  return sensitive ? weasel::CLIENT_CAP_SENSITIVE : weasel::CLIENT_CAP_NONE;
+}
+
+void WeaselIME::_UpdateClientCapabilities(LPINPUTCONTEXT lpIMC, bool force) {
+  DWORD client_caps = _GetClientCapabilities(lpIMC);
+  if (force || client_caps != m_client_caps) {
+    m_client.FocusIn(client_caps);
+    m_client_caps = client_caps;
+  }
 }

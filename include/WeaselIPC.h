@@ -36,6 +36,11 @@ enum WEASEL_IPC_COMMAND {
 };
 
 namespace weasel {
+enum ClientCapability : DWORD {
+  CLIENT_CAP_NONE = 0,
+  CLIENT_CAP_SENSITIVE = 1u << 0,
+};
+
 struct PipeMessage {
   WEASEL_IPC_COMMAND Msg;
   DWORD wParam;
@@ -135,7 +140,7 @@ class Client {
   // 更新输入位置
   void UpdateInputPosition(RECT const& rc);
   // 输入窗口获得焦点
-  void FocusIn();
+  void FocusIn(DWORD client_caps = CLIENT_CAP_NONE);
   // 输入窗口失去焦点
   void FocusOut();
   // 托盤菜單

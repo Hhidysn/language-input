@@ -24,7 +24,7 @@ class ClientImpl {
   bool HighlightCandidateOnCurrentPage(size_t index);
   bool ChangePage(bool backward);
   void UpdateInputPosition(RECT const& rc);
-  void FocusIn();
+  void FocusIn(DWORD client_caps);
   void FocusOut();
   void TrayCommand(UINT menuId);
   bool GetResponseData(ResponseHandler const& handler);

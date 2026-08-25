@@ -225,6 +225,8 @@ void WeaselTSF::_Reconnect() {
   m_client.Disconnect();
   m_client.Connect(NULL);
   m_client.StartSession();
+  _client_caps = MAXDWORD;
+  _input_scope_known = false;
   weasel::ResponseParser parser(NULL, NULL, &_status, NULL, &_cand->style());
   bool ok = m_client.GetResponseData(std::ref(parser));
   if (ok) {

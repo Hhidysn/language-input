@@ -169,7 +169,13 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   BOOL _InitKeyEventSink();
   void _UninitKeyEventSink();
-  void _ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten);
+  void _ProcessKeyEvent(com_ptr<ITfContext> context,
+                        WPARAM wParam,
+                        LPARAM lParam,
+                        BOOL* pfEaten);
+  com_ptr<ITfContext> _GetFocusedContext();
+  void _UpdateClientCapabilities(com_ptr<ITfContext> context,
+                                 bool force = false);
 
   BOOL _InitPreservedKey();
   void _UninitPreservedKey();
@@ -224,6 +230,10 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   /* Weasel Related */
   weasel::Client m_client;
   DWORD _activateFlags;
+  DWORD _client_caps = MAXDWORD;
+  com_ptr<ITfContext> _sensitive_context;
+  bool _input_scope_known = false;
+  bool _input_scope_sensitive = false;
 
   /* IME status */
   weasel::Status _status;

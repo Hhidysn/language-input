@@ -1,0 +1,11 @@
+diff --git a/tools/build/src/tools/msvc.jam b/tools/build/src/tools/msvc.jam
+--- a/tools/build/src/tools/msvc.jam
++++ b/tools/build/src/tools/msvc.jam
+@@ -1137,6 +1137,6 @@ local rule generate-setup-cmd ( version : command : parent : options * : cpu :
+         else
+         {
+-            if [ MATCH "(14.3)" : $(version) ]
++            if [ MATCH "(14\\.[34])" : $(version) ]
+             {
+                 if $(.debug-configuration)
+                 {

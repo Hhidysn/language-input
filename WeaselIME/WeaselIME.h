@@ -58,6 +58,8 @@ class WeaselIME {
   void _SetCandidatePos(LPINPUTCONTEXT lpIMC);
   void _SetCompositionWindow(LPINPUTCONTEXT lpIMC);
   void _UpdateInputPosition(LPINPUTCONTEXT lpIMC, POINT pt);
+  DWORD _GetClientCapabilities(LPINPUTCONTEXT lpIMC) const;
+  void _UpdateClientCapabilities(LPINPUTCONTEXT lpIMC, bool force = false);
 
  private:
   static HINSTANCE s_hModule;
@@ -65,5 +67,6 @@ class WeaselIME {
   HIMC m_hIMC;
   bool m_composing;
   bool m_preferCandidatePos;
+  DWORD m_client_caps;
   weasel::Client m_client;
 };

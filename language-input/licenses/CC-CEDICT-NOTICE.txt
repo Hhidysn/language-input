@@ -1,0 +1,19 @@
+CC-CEDICT attribution and license notice
+========================================
+
+The English GlossPack in this distribution is derived from CC-CEDICT, a
+community-maintained Chinese-English dictionary published by MDBG.
+
+CC-CEDICT is licensed under the Creative Commons Attribution-ShareAlike 4.0
+International License:
+https://creativecommons.org/licenses/by-sa/4.0/
+
+Original project and download page:
+https://www.mdbg.net/chinese/dictionary?page=cc-cedict
+
+Referenced work:
+CEDICT - Copyright (C) 1997, 1998 Paul Andrew Denisowski
+
+The generated GlossPack is an adapted database and is distributed under the
+same CC BY-SA 4.0 license. Its adjacent manifest records the exact source hash,
+source date, entry count, and generated-file hash.

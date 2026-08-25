@@ -1,0 +1,40 @@
+# Rime schema
+# encoding: utf-8
+
+__include: luna_pinyin.schema:/
+
+__patch:
+  - switches/@2/reset: 1
+  - switches/+:
+      - name: language_input_gloss
+        reset: 1
+        states: [ 译注关, 译注开 ]
+      - name: language_input_speech
+        reset: 1
+        states: [ 朗读关, 朗读开 ]
+      - name: language_input_remote
+        reset: 0
+        states: [ 远译关, 远译开 ]
+  - engine/filters/+:
+      - lua_filter@*language_input.gloss_filter
+  - language_input_pinyin.custom:/patch?
+
+schema:
+  schema_id: language_input_pinyin
+  name: 译注全拼
+  version: "0.1.0"
+  author:
+    - Language Input contributors
+    - 佛振 <chen.sst@gmail.com> (朙月拼音)
+  description: |
+    简体中文全拼候选，附可关闭的外语短释义。
+
+translator:
+  prism: language_input_pinyin
+
+menu:
+  page_size: 9
+
+language_input:
+  gloss_language: en
+  gloss_pack: language_input/gloss/en.tsv

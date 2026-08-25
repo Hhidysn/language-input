@@ -129,8 +129,7 @@ void ClientImpl::UpdateInputPosition(RECT const& rc) {
   _SendMessage(WEASEL_IPC_UPDATE_INPUT_POS, compressed_rect, session_id);
 }
 
-void ClientImpl::FocusIn() {
-  DWORD client_caps = 0; /* TODO */
+void ClientImpl::FocusIn(DWORD client_caps) {
   _SendMessage(WEASEL_IPC_FOCUS_IN, client_caps, session_id);
 }
 
@@ -248,8 +247,8 @@ void Client::UpdateInputPosition(RECT const& rc) {
   m_pImpl->UpdateInputPosition(rc);
 }
 
-void Client::FocusIn() {
-  m_pImpl->FocusIn();
+void Client::FocusIn(DWORD client_caps) {
+  m_pImpl->FocusIn(client_caps);
 }
 
 void Client::FocusOut() {
