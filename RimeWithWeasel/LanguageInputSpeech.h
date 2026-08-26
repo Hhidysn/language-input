@@ -20,7 +20,8 @@ struct GlossSpeech {
 // Returns the zero-based index selected by an unmodified 1..9 key press.
 std::optional<size_t> CandidateIndexForSpeech(const KeyEvent& key_event);
 
-// Extracts only comments carrying our explicit marker: 〔language〕 gloss.
+// Extracts only comments carrying an explicit marker such as 〔en·词〕 gloss
+// or 〔ja·AI〕 gloss. The source suffix is validated but never spoken.
 std::optional<GlossSpeech> ParseGlossForSpeech(std::string_view comment);
 
 class SpeechService {

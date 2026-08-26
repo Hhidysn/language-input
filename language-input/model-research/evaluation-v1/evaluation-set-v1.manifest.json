@@ -1,0 +1,60 @@
+{
+  "counts": {
+    "adversarial": 40,
+    "ambiguous": 40,
+    "dictionary_miss": 80,
+    "high_frequency": 120,
+    "variant": 40
+  },
+  "format": "language-input-model-evaluation-v1",
+  "output": {
+    "bytes": 68347,
+    "file": "evaluation-set-v1.json",
+    "sha256": "c16c68e9539b5a77558a6f03d1cc61463815eb5dbeda9e08481661b9b1e9f7c5"
+  },
+  "provenance": {
+    "essay": {
+      "license": "LGPL-3.0-or-later",
+      "revision": "e9b1a374a6ea015fca5bdd04318924b4483ac35a",
+      "source_url": "https://github.com/rime/rime-essay/blob/e9b1a374a6ea015fca5bdd04318924b4483ac35a/essay.txt"
+    },
+    "glosspack": {
+      "license": "CC-BY-SA-4.0",
+      "source_url": "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.zip"
+    },
+    "normalization": {
+      "config": {
+        "file": "t2s.json",
+        "newline_normalized_bytes": 406,
+        "newline_normalized_sha256": "b818534194f27c2d95f01001edb0a5ec49b9050119892cb30a0504bb202cc07c",
+        "raw_bytes": 428,
+        "raw_sha256": "ebe32a6766bfbaea1869f82368f54a8fc6c977a235e8a896b618714872b5df09"
+      },
+      "executable": "librime\\deps\\opencc\\build_x64\\src\\tools\\Release\\opencc.exe",
+      "kind": "OpenCC t2s"
+    }
+  },
+  "sources": {
+    "curated": {
+      "file": "curated-v1.json",
+      "newline_normalized_bytes": 7455,
+      "newline_normalized_sha256": "f2f865f41d6e9f25b8c1601261943d54f03328200c57086d3d320b404b1f88dd",
+      "raw_bytes": 7455,
+      "raw_sha256": "f2f865f41d6e9f25b8c1601261943d54f03328200c57086d3d320b404b1f88dd"
+    },
+    "essay": {
+      "file": "essay.txt",
+      "newline_normalized_bytes": 5887417,
+      "newline_normalized_sha256": "a6f8409c261e5d21bd78e6cbcde8f8e1ef7f68c07ff1c2692c07dd4ff4151cea",
+      "raw_bytes": 6330113,
+      "raw_sha256": "52e00bd5eed9479198923396bae01d4b5adbb13a3ec9b18e441c50cff8641407"
+    },
+    "glosspack": {
+      "file": "en.tsv",
+      "newline_normalized_bytes": 8055697,
+      "newline_normalized_sha256": "ff211a904bb7bd3f67b9ef5d3a1cd265cedf1c505f43239b1786eff374645377",
+      "raw_bytes": 8055697,
+      "raw_sha256": "ff211a904bb7bd3f67b9ef5d3a1cd265cedf1c505f43239b1786eff374645377"
+    }
+  }
+}

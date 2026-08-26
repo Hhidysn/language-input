@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "catalog_state": "evaluation",
+  "generated_at": "2026-08-27T00:00:00+08:00",
+  "selected_model_id": null,
+  "runtime": {
+    "name": "llama.cpp",
+    "release": "v0.3.0",
+    "commit": "c1d0e7a004015f23bc0233470b747b596f29b264",
+    "source_url": "https://github.com/ggml-org/llama.cpp/tree/c1d0e7a004015f23bc0233470b747b596f29b264",
+    "license": "MIT",
+    "license_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/c1d0e7a004015f23bc0233470b747b596f29b264/LICENSE"
+  },
+  "evaluation_contract": {
+    "prompt_version": "language-input-gloss-v1",
+    "route_prompt_versions": [
+      "translation-route-v1",
+      "language-input-translation-v7-plain-single"
+    ],
+    "languages": ["en", "ja", "es"],
+    "source_count": 320,
+    "translations_per_model": 960,
+    "max_model_file_bytes": 2147483648,
+    "max_peak_working_set_bytes": 3758096384,
+    "max_warm_batch_p95_ms": 3000,
+    "min_exact_json_key_success": 0.99,
+    "min_valid_gloss_coverage": 0.95,
+    "min_semantic_acceptance": {
+      "en": 0.9,
+      "ja": 0.85,
+      "es": 0.85
+    }
+  },
+  "research_accounting": {
+    "network_cap_bytes": 21474836480,
+    "network_accounted_bytes": 17500235468,
+    "research_occupancy_cap_bytes": 32212254720,
+    "research_occupancy_bytes": 16780898575,
+    "next_candidate_projected_network_bytes": 22458466112,
+    "next_candidate_requires_cap_confirmation": true
+  },
+  "models": [
+    {
+      "id": "qwen35-2b-q6k",
+      "display_name": "Qwen3.5 2B Q6_K",
+      "state": "failed-hard-gates",
+      "family": "Qwen3.5",
+      "upstream_repository": "unsloth/Qwen3.5-2B-GGUF",
+      "upstream_revision": "f6d5376be1edb4d416d56da11e5397a961aca8ae",
+      "base_repository": "Qwen/Qwen3.5-2B",
+      "base_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+      "file_name": "Qwen3.5-2B-Q6_K.gguf",
+      "quantization": "Q6_K",
+      "size_bytes": 1574961408,
+      "sha256": "fc90339420b4298887aafb307a4291c55440b730133bbffe6ba9630503dcb548",
+      "download_url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q6_K.gguf?download=true",
+      "license": {
+        "spdx": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3.5-2B/raw/15852e8c16360a2fea060d615a32b45270f8a8fc/LICENSE",
+        "redistribution": "allowed-with-license-and-notice-obligations"
+      },
+      "supported_languages": ["en", "ja", "es"],
+      "minimum_ram_bytes": null,
+      "benchmark": {
+        "corpus": "evaluation-v1",
+        "translations_attempted": 960,
+        "valid_batches": 107,
+        "exact_json_key_success": 0.9907407407407407,
+        "eligible_ordinary_valid": 831,
+        "valid_gloss_coverage_ordinary": 0.9892857142857143,
+        "peak_working_set_bytes": 3267850240,
+        "warm_nine_candidate_p95_ms": 6930.674499948509,
+        "prompt_injection_smoke": "passed",
+        "hard_gate_failures": ["latency"]
+      }
+    },
+    {
+      "id": "qwen3-17b-q8",
+      "display_name": "Qwen3 1.7B Q8_0",
+      "state": "failed-hard-gates",
+      "family": "Qwen3",
+      "upstream_repository": "Qwen/Qwen3-1.7B-GGUF",
+      "upstream_revision": "90862c4b9d2787eaed51d12237eafdfe7c5f6077",
+      "base_repository": "Qwen/Qwen3-1.7B",
+      "base_revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+      "file_name": "Qwen3-1.7B-Q8_0.gguf",
+      "quantization": "Q8_0",
+      "size_bytes": 1834426016,
+      "sha256": "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
+      "download_url": "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/90862c4b9d2787eaed51d12237eafdfe7c5f6077/Qwen3-1.7B-Q8_0.gguf?download=true",
+      "license": {
+        "spdx": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3-1.7B/raw/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e/LICENSE",
+        "redistribution": "allowed-with-license-and-notice-obligations"
+      },
+      "supported_languages": ["en", "ja", "es"],
+      "minimum_ram_bytes": null,
+      "benchmark": {
+        "corpus": "evaluation-v1",
+        "translations_attempted": 960,
+        "valid_batches": 107,
+        "exact_json_key_success": 0.9907407407407407,
+        "eligible_ordinary_valid": 831,
+        "valid_gloss_coverage_ordinary": 0.9892857142857143,
+        "peak_working_set_bytes": 2577231872,
+        "warm_nine_candidate_p95_ms": 6651.5123000135645,
+        "prompt_injection_smoke": "passed",
+        "hard_gate_failures": ["latency"]
+      }
+    },
+    {
+      "id": "qwen25-15b-q6k",
+      "display_name": "Qwen2.5 1.5B Instruct Q6_K",
+      "state": "failed-hard-gates",
+      "family": "Qwen2.5",
+      "upstream_repository": "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+      "upstream_revision": "91cad51170dc346986eccefdc2dd33a9da36ead9",
+      "base_repository": "Qwen/Qwen2.5-1.5B-Instruct",
+      "base_revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+      "file_name": "qwen2.5-1.5b-instruct-q6_k.gguf",
+      "quantization": "Q6_K",
+      "size_bytes": 1464178720,
+      "sha256": "e16d94f3b1eb243f6f6be9eee51090ef5dfd741324394fd5b6e0e425c33df5c7",
+      "download_url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/91cad51170dc346986eccefdc2dd33a9da36ead9/qwen2.5-1.5b-instruct-q6_k.gguf?download=true",
+      "license": {
+        "spdx": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/raw/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/LICENSE",
+        "redistribution": "allowed-with-license-and-notice-obligations"
+      },
+      "supported_languages": ["en", "ja", "es"],
+      "minimum_ram_bytes": null,
+      "benchmark": {
+        "corpus": "evaluation-v1",
+        "translations_attempted": 960,
+        "valid_batches": 108,
+        "exact_json_key_success": 1.0,
+        "eligible_ordinary_valid": 840,
+        "valid_gloss_coverage_ordinary": 1.0,
+        "peak_working_set_bytes": 1573298176,
+        "warm_nine_candidate_p95_ms": 5141.0906000528485,
+        "prompt_injection_smoke": "failed-batch-contamination",
+        "hard_gate_failures": ["latency", "prompt_injection"]
+      }
+    },
+    {
+      "id": "granite4-1b-q6k",
+      "display_name": "Granite 4.0 1B Q6_K",
+      "state": "failed-hard-gates",
+      "family": "Granite 4.0 Nano",
+      "upstream_repository": "ibm-granite/granite-4.0-1b-GGUF",
+      "upstream_revision": "b27c2fe3f211b7f44e80fa620177aea371099aaa",
+      "base_repository": "ibm-granite/granite-4.0-1b",
+      "base_revision": "6a7381ba1f54d684ff508d991aeb7dc580157103",
+      "file_name": "granite-4.0-1b-Q6_K.gguf",
+      "quantization": "Q6_K",
+      "size_bytes": 1342641920,
+      "sha256": "c6799eecde3b056e57c756c84cfb6535f6cbaaebcb0dfca197d564b1d2f28455",
+      "download_url": "https://huggingface.co/ibm-granite/granite-4.0-1b-GGUF/resolve/b27c2fe3f211b7f44e80fa620177aea371099aaa/granite-4.0-1b-Q6_K.gguf?download=true",
+      "license": {
+        "spdx": "Apache-2.0",
+        "source_url": "https://raw.githubusercontent.com/ibm-granite/granite-4.0-nano-language-models/1c66d6a87aaa251ef88a3154393d3dddba497bfa/LICENSE",
+        "redistribution": "allowed-with-license-and-notice-obligations"
+      },
+      "supported_languages": ["en", "ja", "es"],
+      "minimum_ram_bytes": null,
+      "benchmark": {
+        "corpus": "evaluation-v1",
+        "translations_attempted": 960,
+        "valid_batches": 108,
+        "exact_json_key_success": 1.0,
+        "eligible_ordinary_valid": 840,
+        "valid_gloss_coverage_ordinary": 1.0,
+        "peak_working_set_bytes": 2267021312,
+        "warm_nine_candidate_p95_ms": 6270.167500013486,
+        "prompt_injection_smoke": "failed-ja-es",
+        "hard_gate_failures": ["latency", "prompt_injection"]
+      }
+    }
+  ],
+  "route_evaluations": [
+    {
+      "id": "m2m100-418m-int8-b4",
+      "state": "failed-semantic-gate",
+      "upstream_repository": "facebook/m2m100_418M",
+      "upstream_revision": "55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636",
+      "license": "MIT",
+      "converted_model_bytes": 490667752,
+      "converted_model_sha256": "a1826980fc5c037e69c7ac94fcb56c03001a66f380eb71863cc0a3879e71421b",
+      "semantic_acceptance": {
+        "en": 0.7666666666666667,
+        "ja": 0.8,
+        "es": 0.7333333333333333
+      },
+      "hard_gate_failures": ["semantic-en", "semantic-ja", "semantic-es"]
+    },
+    {
+      "id": "linguaforge-qwen-route-v1",
+      "state": "failed-semantic-gate",
+      "components": [
+        "linguaforge-v5e-08b-q8-plain-v7",
+        "qwen25-15b-q6k-plain-v7-es"
+      ],
+      "blind_review_package_sha256": "77edc8825d719c87b65126d8f5b84fce35d068caf49f072510a234d0b96fe7bc",
+      "optimistic_semantic_upper_bound": {
+        "en": 0.9,
+        "ja": 0.7,
+        "es": 0.5666666666666667
+      },
+      "hard_gate_failures": ["semantic-ja", "semantic-es"]
+    },
+    {
+      "id": "m2m100-12b-int8",
+      "state": "pending-network-cap-confirmation",
+      "upstream_repository": "facebook/m2m100_1.2B",
+      "upstream_revision": "7b36184180524c1a1bbfa37f120a608046250b98",
+      "source_file_name": "pytorch_model.bin",
+      "source_size_bytes": 4958230644,
+      "source_sha256": "a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4",
+      "license": "MIT"
+    }
+  ]
+}

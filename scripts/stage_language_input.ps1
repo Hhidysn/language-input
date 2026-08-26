@@ -77,16 +77,37 @@ if (-not $pageSizePattern.IsMatch($defaultText)) {
 }
 $defaultText = $pageSizePattern.Replace($defaultText, '${1} 9', 1)
 
-if ($defaultText -notmatch '(?m)^    - language_input_gloss\s*$') {
-  $saveOptionsPattern = [regex]::new('(?m)^(  save_options:\r?\n)')
-  if (-not $saveOptionsPattern.IsMatch($defaultText)) {
-    throw 'Could not locate switcher/save_options in output/data/default.yaml'
-  }
-  $savedOptions = '${1}' +
-    '    - language_input_gloss' + $newline +
-    '    - language_input_speech' + $newline
-  $defaultText = $saveOptionsPattern.Replace($defaultText, $savedOptions, 1)
+$desiredSavedOptions = @(
+  'language_input_gloss'
+  'language_input_ai'
+  'language_input_en'
+  'language_input_ja'
+  'language_input_es'
+  'language_input_speech'
+)
+$saveOptionsPattern = [regex]::new(
+  '(?m)^(  save_options:\r?\n)((?:    - [^\r\n]+\r?\n)*)'
+)
+$saveOptionsMatch = $saveOptionsPattern.Match($defaultText)
+if (-not $saveOptionsMatch.Success) {
+  throw 'Could not locate switcher/save_options in output/data/default.yaml'
 }
+$existingSavedOptions = @(
+  [regex]::Matches(
+    $saveOptionsMatch.Groups[2].Value,
+    '(?m)^    - ([^\r\n]+)\s*$'
+  ) | ForEach-Object { $_.Groups[1].Value.Trim() }
+)
+$otherSavedOptions = @(
+  $existingSavedOptions | Where-Object { $_ -notin $desiredSavedOptions }
+)
+$orderedSavedOptions = @($desiredSavedOptions + $otherSavedOptions)
+$savedOptionsBlock = '  save_options:' + $newline +
+  (($orderedSavedOptions | ForEach-Object { '    - ' + $_ }) -join $newline) +
+  $newline
+$defaultText = $defaultText.Substring(0, $saveOptionsMatch.Index) +
+  $savedOptionsBlock +
+  $defaultText.Substring($saveOptionsMatch.Index + $saveOptionsMatch.Length)
 
 [IO.File]::WriteAllText($defaultPath, $defaultText, $utf8NoBom)
 

@@ -42,6 +42,10 @@ std::wstring LocaleForLanguage(std::wstring language) {
   std::replace(language.begin(), language.end(), L'_', L'-');
   if (_wcsicmp(language.c_str(), L"en") == 0)
     return L"en-US";
+  if (_wcsicmp(language.c_str(), L"ja") == 0)
+    return L"ja-JP";
+  if (_wcsicmp(language.c_str(), L"es") == 0)
+    return L"es-ES";
   if (_wcsicmp(language.c_str(), L"zh") == 0)
     return L"zh-CN";
   return language;
@@ -64,6 +68,7 @@ std::optional<size_t> CandidateIndexForSpeech(const KeyEvent& key_event) {
 std::optional<GlossSpeech> ParseGlossForSpeech(std::string_view comment) {
   constexpr std::string_view kMarkerStart = u8"〔";
   constexpr std::string_view kMarkerEnd = u8"〕";
+  constexpr std::string_view kSourceSeparator = u8"·";
   size_t marker = comment.rfind(kMarkerStart);
   if (marker == std::string_view::npos)
     return std::nullopt;
@@ -72,12 +77,23 @@ std::optional<GlossSpeech> ParseGlossForSpeech(std::string_view comment) {
   if (language_end == std::string_view::npos)
     return std::nullopt;
 
-  std::string_view language =
+  std::string_view marker_text =
       comment.substr(language_start, language_end - language_start);
+  size_t separator = marker_text.find(kSourceSeparator);
+  if (separator == std::string_view::npos ||
+      marker_text.find(kSourceSeparator, separator + kSourceSeparator.size()) !=
+          std::string_view::npos) {
+    return std::nullopt;
+  }
+  std::string_view language = marker_text.substr(0, separator);
+  std::string_view source =
+      marker_text.substr(separator + kSourceSeparator.size());
   if (language.size() < 2 || language.size() > 35 ||
       !std::all_of(language.begin(), language.end(), IsLanguageCharacter)) {
     return std::nullopt;
   }
+  if (source != u8"词" && source != "AI")
+    return std::nullopt;
 
   size_t gloss_start = language_end + kMarkerEnd.size();
   if (gloss_start >= comment.size() || comment[gloss_start] != ' ')

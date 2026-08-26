@@ -45,7 +45,7 @@ bool Exercise(RimeApi* api, RimeSessionId session, const char* key_sequence) {
     return false;
   bool valid =
       context.menu.num_candidates > 0 && context.menu.candidates[0].comment &&
-      std::string(context.menu.candidates[0].comment).find(u8"〔en〕") !=
+      std::string(context.menu.candidates[0].comment).find(u8"〔en·词〕") !=
           std::string::npos;
   api->free_context(&context);
   api->clear_composition(session);

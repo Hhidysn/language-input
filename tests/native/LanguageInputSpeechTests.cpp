@@ -35,20 +35,33 @@ int main() {
   Check(!CandidateIndexForSpeech(weasel::KeyEvent('1', ibus::RELEASE_MASK)),
         "key release must not trigger candidate speech");
 
-  auto gloss = ParseGlossForSpeech("existing  〔en〕 hello; hi");
+  auto gloss = ParseGlossForSpeech("existing  〔en·词〕 hello; hi");
   Check(gloss && gloss->language == L"en" && gloss->text == L"hello; hi",
-        "a marked gloss should parse after an existing comment");
+        "a dictionary gloss should parse after an existing comment");
+  auto japanese = ParseGlossForSpeech("〔ja·AI〕 こんにちは");
+  Check(japanese && japanese->language == L"ja" &&
+            japanese->text == L"こんにちは",
+        "an AI gloss should expose only its language prefix and text");
+  auto spanish = ParseGlossForSpeech("〔es·AI〕 hola");
+  Check(spanish && spanish->language == L"es" && spanish->text == L"hola",
+        "a Spanish AI gloss should parse");
   Check(!ParseGlossForSpeech("ordinary candidate comment"),
         "ordinary comments must never be spoken");
-  Check(!ParseGlossForSpeech("〔e!〕 invalid language"),
+  Check(!ParseGlossForSpeech("〔en〕 legacy marker"),
+        "a source-less legacy marker must be rejected");
+  Check(!ParseGlossForSpeech("〔e!·AI〕 invalid language"),
         "invalid language tags must be rejected");
-  Check(!ParseGlossForSpeech("〔en〕 line\nbreak"),
+  Check(!ParseGlossForSpeech("〔en·remote〕 invalid source"),
+        "unknown source markers must be rejected");
+  Check(!ParseGlossForSpeech("〔en·AI·词〕 ambiguous source"),
+        "multiple source separators must be rejected");
+  Check(!ParseGlossForSpeech("〔en·词〕 line\nbreak"),
         "multi-line speech text must be rejected");
-  Check(!ParseGlossForSpeech("〔en〕"),
+  Check(!ParseGlossForSpeech("〔en·词〕"),
         "an empty marked gloss must be rejected");
-  Check(!ParseGlossForSpeech(std::string("〔en〕 ") + std::string(513, 'a')),
+  Check(!ParseGlossForSpeech(std::string("〔en·词〕 ") + std::string(513, 'a')),
         "oversized speech text must be rejected");
-  Check(!ParseGlossForSpeech(std::string("〔en〕 ") + "\xff"),
+  Check(!ParseGlossForSpeech(std::string("〔en·词〕 ") + "\xff"),
         "invalid UTF-8 must be rejected");
 
   HWND parent =

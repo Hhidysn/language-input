@@ -8,13 +8,19 @@ __patch:
   - switches/+:
       - name: language_input_gloss
         reset: 1
-        states: [ 译注关, 译注开 ]
+        states: [ 译注显示：关, 译注显示：开 ]
+      - name: language_input_ai
+        reset: 0
+        states: [ 翻译来源：词典, 翻译来源：AI ]
+      - options:
+          - language_input_en
+          - language_input_ja
+          - language_input_es
+        reset: 0
+        states: [ 目标语言：英语, 目标语言：日语, 目标语言：西班牙语 ]
       - name: language_input_speech
         reset: 1
-        states: [ 朗读关, 朗读开 ]
-      - name: language_input_remote
-        reset: 0
-        states: [ 远译关, 远译开 ]
+        states: [ 朗读：关, 朗读：开 ]
   - engine/filters/+:
       - lua_filter@*language_input.gloss_filter
   - language_input_flypy.custom:/patch?
@@ -22,7 +28,7 @@ __patch:
 schema:
   schema_id: language_input_flypy
   name: 译注小鹤双拼
-  version: "0.1.0"
+  version: "0.2.0"
   author:
     - Language Input contributors
     - 鹤 (小鹤双拼布局)
@@ -107,3 +113,4 @@ menu:
 language_input:
   gloss_language: en
   gloss_pack: language_input/gloss/en.tsv
+  gloss_normalizer: t2s.json
