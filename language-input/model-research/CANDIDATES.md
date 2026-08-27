@@ -7,7 +7,7 @@ Approved research directory:
 
 ## Research boundary
 
-- Cumulative network-transfer cap: 20 GiB (21,474,836,480 bytes).
+- Cumulative network-transfer cap: 22 GiB (23,622,320,128 bytes).
 - Research-child occupancy cap: 30 GiB (32,212,254,720 bytes).
 - Free space recorded before creation: 937,558,605,824 bytes
   (873.17 GiB) on `F:`.
@@ -24,19 +24,18 @@ the initial transfer estimate 6,484,643,520 bytes (6.039 GiB). The immutable
 download inventory is also recorded in the workflow-owned
 `provenance/research-gate-v1.json` before any weight is downloaded.
 
-Current conservative accounting on 2026-08-27 is 17,500,235,468 network bytes
-(16.298 GiB) and 16,780,898,575 bytes (15.628 GiB) of research-child
-occupancy. This includes the later translation-specific candidates and raw
-reviews. The next credible source artifact, official `facebook/m2m100_1.2B`
-`pytorch_model.bin`, is 4,958,230,644 bytes. Downloading it would raise the
-network total to 22,458,466,112 bytes (20.916 GiB), before small tokenizer and
-configuration files, so it is not authorized by the current 20 GiB transfer
-cap. Evaluation is paused pending an explicit increase to 22 GiB; the 30 GiB
-occupancy cap remains sufficient.
+The user explicitly raised the transfer cap to 22 GiB on 2026-08-27. Final
+conservative accounting after the M2M100 1.2B screen is 22,458,478,318 network
+bytes and 23,004,399,474 bytes of research-child occupancy. The ledger includes
+the pinned 4,958,230,644-byte weight, 12,206 bytes of fixed-revision manifest,
+configuration and model-card data, the offline INT8 conversion, two full local
+benchmark passes and the blind-review artifacts. No additional candidate is
+queued; the network and occupancy caps remain unexceeded.
 
 ## Runtime decision
 
-Status: **research build validated; release integration pending**.
+Status: **research build validated; no release integration is authorized
+because no candidate passes every hard gate**.
 
 The pinned runtime candidate is official `ggml-org/llama.cpp` release
 `v0.3.0`, annotated tag target commit
@@ -288,16 +287,43 @@ every disagreement were resolved in the route's favor, the acceptance union
 would be only 90.0% English, 70.0% Japanese and 56.7% Spanish. The route cannot
 reach the required Japanese/Spanish thresholds.
 
-### Pending M2M100 1.2B
+### M2M100 1.2B INT8
 
-The last credible model inside the final 1–2 GiB INT8 target is official
+The last credible model inside the final 1–2 GiB INT8 target was official
 `facebook/m2m100_1.2B`, pinned at
 `7b36184180524c1a1bbfa37f120a608046250b98`. Hugging Face identifies the model
-as MIT and ungated. The only Transformers weight is the 4,958,230,644-byte
-`pytorch_model.bin`, with upstream SHA256
-`a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4`;
-there is no safetensors alternative. It will be downloaded, converted to INT8,
-and evaluated only after the research transfer cap is explicitly raised.
+as MIT and ungated. The 4,958,230,644-byte `pytorch_model.bin` was verified at
+SHA256
+`a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4`.
+The fixed-revision `config.json`, tokenizer configuration and model card were
+downloaded separately; four tokenizer artifacts whose upstream Git/LFS hashes
+matched the 418M snapshot were reused locally. The resulting source snapshot
+manifest has SHA256
+`6ad795ea240a92a51395a33ff273cf20d6015d97918c8e9bbb3dde7c7369ce2a`.
+
+CTranslate2 4.8.1 converted the model offline to INT8. The converted
+`model.bin` is 1,249,655,188 bytes with SHA256
+`61a68b96c0e4a10a09a1944f9e6627a8854dccf53a0127817808bb976ce94b4f`;
+the complete converted directory is 1,258,713,172 bytes. On the full
+320-source pass, English/Japanese/Spanish nine-item p95 was respectively
+1,154.82/1,574.76/809.04 ms. The largest measured peak working set was
+1,795,371,008 bytes. Ordinary valid coverage was 96.8%/100%/100%. A separate
+safety-policy pass deterministically withheld 20 instruction-, template- or
+credential-shaped sources per language before inference.
+
+The screening blind-review package has SHA256
+`17bcd50d74b825d6a5e9d357372d73b0822302f469f4b2c1a32685513964ca92`.
+It mixed the 1.2B candidate with the already measured 418M route, hid model
+identity and was independently reviewed by DeepSeek V4 Flash and GLM-5.2.
+All 180 items were covered; agreement was 92.2% and Cohen's kappa was about
+0.806. For the 1.2B candidate, the two reviewers accepted respectively
+63.3%/70.0% English, 70.0%/63.3% Japanese and 70.0%/76.7% Spanish. Even if
+every disagreement were adjudicated in the candidate's favor, the optimistic
+upper bounds would be only 73.3%/70.0%/76.7%. These are below all three
+90%/85%/85% semantic thresholds, so adjudication cannot change this screening
+result and the candidate is not advanced to the larger release-selection
+review. The compact machine-readable evidence is
+`model-research/m2m100-12b-screening-v1.json`.
 
 ## Screened-out candidates
 

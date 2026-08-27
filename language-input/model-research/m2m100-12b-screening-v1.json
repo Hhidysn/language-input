@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "report_state": "rejected-screening",
+  "generated_at": "2026-08-27T09:54:14+08:00",
+  "candidate": {
+    "id": "m2m100-12b-int8-b4",
+    "upstream_repository": "facebook/m2m100_1.2B",
+    "upstream_revision": "7b36184180524c1a1bbfa37f120a608046250b98",
+    "license": "MIT",
+    "source_weight_bytes": 4958230644,
+    "source_weight_sha256": "a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4",
+    "source_snapshot_manifest_sha256": "6ad795ea240a92a51395a33ff273cf20d6015d97918c8e9bbb3dde7c7369ce2a"
+  },
+  "conversion": {
+    "runtime": "CTranslate2 4.8.1",
+    "transformers": "4.57.1",
+    "torch": "2.7.1+cpu",
+    "quantization": "int8",
+    "converted_artifact_bytes": 1258713172,
+    "converted_model_bytes": 1249655188,
+    "converted_model_sha256": "61a68b96c0e4a10a09a1944f9e6627a8854dccf53a0127817808bb976ce94b4f"
+  },
+  "full_corpus_benchmark": {
+    "source_count_per_language": 320,
+    "batch_size": 9,
+    "threads": 8,
+    "beam_size": 4,
+    "languages": {
+      "en": {
+        "valid_batches": 35,
+        "batches": 36,
+        "ordinary_valid": 271,
+        "ordinary_attempts": 280,
+        "ordinary_coverage": 0.9678571428571429,
+        "warm_nine_candidate_p95_ms": 1154.8230000007607,
+        "peak_working_set_bytes": 1790865408
+      },
+      "ja": {
+        "valid_batches": 36,
+        "batches": 36,
+        "ordinary_valid": 280,
+        "ordinary_attempts": 280,
+        "ordinary_coverage": 1.0,
+        "warm_nine_candidate_p95_ms": 1574.7560999989219,
+        "peak_working_set_bytes": 1792503808
+      },
+      "es": {
+        "valid_batches": 33,
+        "batches": 36,
+        "ordinary_valid": 280,
+        "ordinary_attempts": 280,
+        "ordinary_coverage": 1.0,
+        "warm_nine_candidate_p95_ms": 809.0400000000955,
+        "peak_working_set_bytes": 1795371008
+      }
+    }
+  },
+  "deterministic_safety_screen": {
+    "policy": "suppress instruction, template, and credential-shaped sources before inference",
+    "attempted_per_language": 320,
+    "submitted_per_language": 300,
+    "suppressed_per_language": 20,
+    "suppressed_total": 60
+  },
+  "blind_semantic_screen": {
+    "purpose": "early rejection screen; a passing model would still require the full release-selection review",
+    "blind_package_sha256": "17bcd50d74b825d6a5e9d357372d73b0822302f469f4b2c1a32685513964ca92",
+    "anonymous_anchor": "m2m100-418m-int8-b4",
+    "reviewed_items_total": 180,
+    "candidate_items": 90,
+    "candidate_items_per_language": 30,
+    "reviewer_a_route": "opencode-go/deepseek-v4-flash",
+    "reviewer_b_route": "opencode-go/glm-5.2",
+    "agreement": 0.9222222222222223,
+    "cohen_kappa": 0.8061836640516845,
+    "disagreements_total": 14,
+    "languages": {
+      "en": {
+        "reviewer_a_acceptance": 0.6333333333333333,
+        "reviewer_b_acceptance": 0.7,
+        "candidate_disagreements": 4,
+        "optimistic_acceptance_upper_bound": 0.7333333333333333,
+        "required_acceptance": 0.9
+      },
+      "ja": {
+        "reviewer_a_acceptance": 0.7,
+        "reviewer_b_acceptance": 0.6333333333333333,
+        "candidate_disagreements": 2,
+        "optimistic_acceptance_upper_bound": 0.7,
+        "required_acceptance": 0.85
+      },
+      "es": {
+        "reviewer_a_acceptance": 0.7,
+        "reviewer_b_acceptance": 0.7666666666666667,
+        "candidate_disagreements": 2,
+        "optimistic_acceptance_upper_bound": 0.7666666666666667,
+        "required_acceptance": 0.85
+      }
+    },
+    "adjudication": "not required for rejection because accepting every candidate disagreement still fails every language threshold"
+  },
+  "result": {
+    "selected": false,
+    "hard_gate_failures": [
+      "semantic-en",
+      "semantic-ja",
+      "semantic-es"
+    ],
+    "selected_model_id_after_screen": null
+  }
+}
