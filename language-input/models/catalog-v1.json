@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "catalog_state": "evaluation",
-  "generated_at": "2026-08-27T09:54:14+08:00",
+  "generated_at": "2026-08-27T19:41:48+08:00",
   "selected_model_id": null,
   "runtime": {
     "name": "llama.cpp",
@@ -32,10 +32,10 @@
     }
   },
   "research_accounting": {
-    "network_cap_bytes": 23622320128,
-    "network_accounted_bytes": 22458478318,
+    "network_cap_bytes": 32212254720,
+    "network_accounted_bytes": 22869139657,
     "research_occupancy_cap_bytes": 32212254720,
-    "research_occupancy_bytes": 23004399474,
+    "research_occupancy_bytes": 23415168465,
     "next_candidate_projected_network_bytes": null,
     "next_candidate_requires_cap_confirmation": false
   },
@@ -255,6 +255,45 @@
         "semantic-en",
         "semantic-ja",
         "semantic-es"
+      ]
+    },
+    {
+      "id": "quickmt-zh-en-c27cc802",
+      "state": "failed-semantic-gate-stop-early",
+      "upstream_repository": "quickmt/quickmt-zh-en",
+      "upstream_revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+      "license": "CC-BY-4.0",
+      "runtime": {
+        "ctranslate2": "4.8.1",
+        "sentencepiece": "0.2.1",
+        "quantization": "int8",
+        "beam_size": 4
+      },
+      "runtime_files_bytes": 409706714,
+      "model_bin_sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+      "runtime_manifest_sha256": "a84705b1ad8bf88738df6d3978ee5e657d29fc0821e231b299b4da6764d7a16a",
+      "benchmark": {
+        "corpus": "evaluation-v1",
+        "ordinary_valid_coverage": 1.0,
+        "warm_nine_candidate_p95_ms": 49.62160000286531,
+        "peak_working_set_bytes": 754483200,
+        "deterministic_safety_suppressed": 20
+      },
+      "blind_review_package_sha256": "ff524d5166bb1c61007ad529368a6698542b1446177dd83d54386124a75a8764",
+      "semantic_acceptance": {
+        "en_reviewer_a": 0.8,
+        "en_reviewer_b": 0.8666666666666667
+      },
+      "optimistic_semantic_upper_bound": {
+        "en": 0.8666666666666667
+      },
+      "screening_report": "language-input/model-research/quickmt-zh-en-screening-v1.json",
+      "hard_gate_failures": [
+        "semantic-en"
+      ],
+      "stop_early_not_downloaded": [
+        "quickmt-en-ja",
+        "quickmt-en-es"
       ]
     }
   ]

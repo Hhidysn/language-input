@@ -574,6 +574,41 @@ class TranslationRouteBenchmarkTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "language codes"):
                 load_route_config(route_path)
 
+    def test_route_loader_resolves_sentencepiece_tokenizers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            model = root / "model"
+            model.mkdir()
+            source_tokenizer = model / "src.spm.model"
+            target_tokenizer = model / "tgt.spm.model"
+            source_tokenizer.write_bytes(b"source")
+            target_tokenizer.write_bytes(b"target")
+            route = {
+                "format": ROUTE_FORMAT,
+                "route_id": "quickmt-zh-en",
+                "language": "en",
+                "stages": [
+                    {
+                        "name": "zh-en",
+                        "kind": "sentencepiece",
+                        "model_path": str(model),
+                        "source_tokenizer": str(source_tokenizer),
+                        "target_tokenizer": str(target_tokenizer),
+                        "revision": "deadbeef",
+                    }
+                ],
+            }
+            route_path = root / "route.json"
+            route_path.write_text(json.dumps(route), encoding="utf-8")
+            checked = load_route_config(route_path)
+            stage = checked["stages"][0]
+            self.assertEqual(str(source_tokenizer.resolve()), stage["source_tokenizer"])
+            self.assertEqual(str(target_tokenizer.resolve()), stage["target_tokenizer"])
+            route["stages"][0]["source_language"] = "zh"
+            route_path.write_text(json.dumps(route), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "must not declare"):
+                load_route_config(route_path)
+
 
 class SemanticReviewBuilderTests(unittest.TestCase):
     @staticmethod
@@ -695,6 +730,47 @@ class SemanticReviewBuilderTests(unittest.TestCase):
             )
         self.assertEqual(len(LANGUAGES) * len(texts), len(loaded))
         self.assertEqual("ja-长尾", loaded[("ja", "长尾")])
+
+    def test_semantic_builder_supports_a_single_language_stop_early_screen(self) -> None:
+        entries = self.entries()
+        outputs = {
+            model_id: {
+                ("en", row["text"]): f"output-{number}-en-{row['id']}"
+                for row in entries
+            }
+            for number, model_id in enumerate(("model-alpha", "model-beta"), start=1)
+        }
+        package, key = build_review_documents(
+            entries,
+            outputs,
+            per_category=1,
+            seed=11,
+            languages=("en",),
+        )
+        self.assertEqual(["en"], package["languages"])
+        self.assertEqual(10, package["item_count"])
+        items_by_id, mapping_by_id = validate_package_and_key(package, key)
+        reviews = {
+            review_id: {
+                "review_id": review_id,
+                "accept": True,
+                "issue": "ok",
+                "note": "",
+            }
+            for review_id in items_by_id
+        }
+        summary = summarize_reviews(
+            package,
+            items_by_id,
+            mapping_by_id,
+            reviews,
+            reviews,
+            adjudication={},
+        )
+        self.assertEqual(
+            {"en": True},
+            summary["semantic_gate"]["model-alpha"]["languages"],
+        )
 
     def test_reviewer_event_parser_and_contract_validation(self) -> None:
         response = {

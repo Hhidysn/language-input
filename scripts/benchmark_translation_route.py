@@ -32,7 +32,7 @@ from benchmark_local_model import (
 ROUTE_FORMAT = "language-input-translation-route-v1"
 PROMPT_VERSION = "translation-route-v1"
 MAX_GLOSS_CHARACTERS = 40
-ALLOWED_STAGE_KINDS = {"marian", "m2m100"}
+ALLOWED_STAGE_KINDS = {"marian", "m2m100", "sentencepiece"}
 
 
 def load_route_config(path: Path) -> dict[str, object]:
@@ -59,17 +59,28 @@ def load_route_config(path: Path) -> dict[str, object]:
     for raw_stage in stages:
         if not isinstance(raw_stage, dict):
             raise ValueError("translation stage must be an object")
-        required = {"name", "kind", "model_path", "tokenizer_model", "revision"}
+        common_required = {"name", "kind", "model_path", "revision"}
         optional = {"source_language", "target_language"}
+        if not common_required.issubset(raw_stage):
+            raise ValueError("translation stage has unexpected or missing keys")
+        kind = raw_stage["kind"]
+        if kind not in ALLOWED_STAGE_KINDS:
+            raise ValueError(f"unsupported translation stage kind: {kind!r}")
+        tokenizer_required = (
+            {"source_tokenizer", "target_tokenizer"}
+            if kind == "sentencepiece"
+            else {"tokenizer_model"}
+        )
+        required = common_required | tokenizer_required
         if not required.issubset(raw_stage) or not set(raw_stage).issubset(
             required | optional
         ):
             raise ValueError("translation stage has unexpected or missing keys")
-        if not all(isinstance(raw_stage[key], str) and raw_stage[key] for key in required):
+        if not all(
+            isinstance(raw_stage[key], str) and raw_stage[key] for key in required
+        ):
             raise ValueError("translation stage contains an empty non-string field")
         stage = {key: str(value) for key, value in raw_stage.items()}
-        if stage["kind"] not in ALLOWED_STAGE_KINDS:
-            raise ValueError(f"unsupported translation stage kind: {stage['kind']!r}")
         if stage["name"] in stage_names:
             raise ValueError(f"duplicate translation stage name: {stage['name']}")
         stage_names.add(stage["name"])
@@ -79,11 +90,21 @@ def load_route_config(path: Path) -> dict[str, object]:
             ) != language:
                 raise ValueError("m2m100 stage language codes do not match the route")
         elif "source_language" in stage or "target_language" in stage:
-            raise ValueError("Marian stages must not declare language-code prefixes")
+            raise ValueError(
+                "Marian and SentencePiece stages must not declare language-code prefixes"
+            )
         model_path = Path(stage["model_path"]).resolve(strict=True)
         if not model_path.is_dir():
             raise ValueError(f"translation model is not a directory: {model_path}")
         stage["model_path"] = str(model_path)
+        if stage["kind"] == "sentencepiece":
+            for key in ("source_tokenizer", "target_tokenizer"):
+                tokenizer_path = Path(stage[key]).resolve(strict=True)
+                if not tokenizer_path.is_file():
+                    raise ValueError(
+                        f"SentencePiece tokenizer is not a file: {tokenizer_path}"
+                    )
+                stage[key] = str(tokenizer_path)
         checked_stages.append(stage)
     return {
         "format": ROUTE_FORMAT,
@@ -152,20 +173,34 @@ def validate_hypotheses(
 class CTranslate2Stage:
     def __init__(self, config: Mapping[str, str], *, threads: int, beam_size: int) -> None:
         import ctranslate2  # Imported lazily so repository unit tests need no ML runtime.
-        from transformers import AutoTokenizer
 
         self.name = config["name"]
         self.kind = config["kind"]
         self.beam_size = beam_size
         self.source_language = config.get("source_language")
         self.target_language = config.get("target_language")
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            config["tokenizer_model"],
-            revision=config["revision"],
-            local_files_only=True,
-        )
-        if self.kind == "m2m100":
-            self.tokenizer.src_lang = self.source_language
+        self.tokenizer = None
+        self.source_tokenizer = None
+        self.target_tokenizer = None
+        if self.kind == "sentencepiece":
+            import sentencepiece
+
+            self.source_tokenizer = sentencepiece.SentencePieceProcessor(
+                model_file=config["source_tokenizer"]
+            )
+            self.target_tokenizer = sentencepiece.SentencePieceProcessor(
+                model_file=config["target_tokenizer"]
+            )
+        else:
+            from transformers import AutoTokenizer
+
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                config["tokenizer_model"],
+                revision=config["revision"],
+                local_files_only=True,
+            )
+            if self.kind == "m2m100":
+                self.tokenizer.src_lang = self.source_language
         self.translator = ctranslate2.Translator(
             config["model_path"],
             device="cpu",
@@ -182,12 +217,20 @@ class CTranslate2Stage:
     ) -> list[list[str]]:
         if num_hypotheses < 1 or num_hypotheses > self.beam_size:
             raise ValueError("num_hypotheses must be between one and beam_size")
-        encoded = [
-            self.tokenizer.convert_ids_to_tokens(self.tokenizer.encode(text))
-            for text in texts
-        ]
+        if self.kind == "sentencepiece":
+            assert self.source_tokenizer is not None
+            encoded = [
+                self.source_tokenizer.encode(text, out_type=str) for text in texts
+            ]
+        else:
+            assert self.tokenizer is not None
+            encoded = [
+                self.tokenizer.convert_ids_to_tokens(self.tokenizer.encode(text))
+                for text in texts
+            ]
         target_prefix = None
         if self.kind == "m2m100":
+            assert self.tokenizer is not None
             target_token_id = self.tokenizer.get_lang_id(self.target_language)
             target_token = self.tokenizer.convert_ids_to_tokens(target_token_id)
             target_prefix = [[target_token] for _ in texts]
@@ -202,6 +245,13 @@ class CTranslate2Stage:
             max_decoding_length=64,
             return_scores=False,
         )
+        if self.kind == "sentencepiece":
+            assert self.target_tokenizer is not None
+            return [
+                [self.target_tokenizer.decode(hypothesis) for hypothesis in result.hypotheses]
+                for result in results
+            ]
+        assert self.tokenizer is not None
         return [
             [
                 self.tokenizer.decode(
@@ -499,10 +549,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     try:
         import ctranslate2
+        import sentencepiece
         import transformers
 
         summary["runtime"] = {
             "ctranslate2": ctranslate2.__version__,
+            "sentencepiece": sentencepiece.__version__,
             "transformers": transformers.__version__,
         }
     except ImportError:

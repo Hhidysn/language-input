@@ -104,12 +104,20 @@ def load_model_outputs(
     *,
     model_id: str,
     corpus_texts: set[str],
+    languages: Sequence[str] = LANGUAGES,
 ) -> dict[tuple[str, str], str | None]:
     if not model_id or any(character.isspace() for character in model_id):
         raise ValueError(f"invalid model id: {model_id!r}")
     shards = [(path, model_id)] if isinstance(path, Path) else list(path)
     if not shards:
         raise ValueError(f"model {model_id!r} has no benchmark shards")
+    checked_languages = tuple(languages)
+    if (
+        not checked_languages
+        or len(set(checked_languages)) != len(checked_languages)
+        or any(language not in LANGUAGES for language in checked_languages)
+    ):
+        raise ValueError(f"invalid semantic-review languages: {checked_languages!r}")
     results: dict[tuple[str, str], str | None] = {}
     for shard_path, raw_model_id in shards:
         if not raw_model_id or any(character.isspace() for character in raw_model_id):
@@ -132,7 +140,7 @@ def load_model_outputs(
                 language = record.get("language")
                 requested = record.get("requested")
                 outputs = record.get("outputs")
-                if language not in LANGUAGES:
+                if language not in checked_languages:
                     raise ValueError(f"wrong language at {shard_path}:{line_number}")
                 if (
                     not isinstance(requested, list)
@@ -158,7 +166,9 @@ def load_model_outputs(
                     if key in results:
                         raise ValueError(f"duplicate benchmark attempt for {key!r}")
                     results[key] = outputs.get(word)
-    expected = {(language, text) for language in LANGUAGES for text in corpus_texts}
+    expected = {
+        (language, text) for language in checked_languages for text in corpus_texts
+    }
     missing = expected - set(results)
     extra = set(results) - expected
     if missing or extra:
@@ -197,17 +207,25 @@ def build_review_documents(
     *,
     per_category: int = DEFAULT_PER_CATEGORY,
     seed: int = DEFAULT_SEED,
+    languages: Sequence[str] = LANGUAGES,
 ) -> tuple[dict[str, object], dict[str, object]]:
     model_ids = sorted(outputs_by_model)
     if len(model_ids) < 2:
         raise ValueError("semantic review requires at least two model candidates")
+    checked_languages = tuple(languages)
+    if (
+        not checked_languages
+        or len(set(checked_languages)) != len(checked_languages)
+        or any(language not in LANGUAGES for language in checked_languages)
+    ):
+        raise ValueError(f"invalid semantic-review languages: {checked_languages!r}")
     selected = select_sources(entries, per_category=per_category, seed=seed)
     internal_items: list[dict[str, object]] = []
     for row in selected:
         source_id = str(row["id"])
         text = str(row["text"])
         category = str(row["category"])
-        for language in LANGUAGES:
+        for language in checked_languages:
             for model_id in model_ids:
                 model_outputs = outputs_by_model[model_id]
                 key = (language, text)
@@ -253,7 +271,9 @@ def build_review_documents(
                 "language": str(item["language"]),
             }
         )
-    expected_items = len(model_ids) * len(LANGUAGES) * len(CATEGORIES) * per_category
+    expected_items = (
+        len(model_ids) * len(checked_languages) * len(CATEGORIES) * per_category
+    )
     if len(review_items) != expected_items:
         raise AssertionError(f"built {len(review_items)} review items, expected {expected_items}")
     counts = Counter(
@@ -264,12 +284,13 @@ def build_review_documents(
         "format": REVIEW_FORMAT,
         "seed": seed,
         "model_count": len(model_ids),
+        "languages": list(checked_languages),
         "sample_per_category": per_category,
         "item_count": len(review_items),
         "stratum_counts": {
             f"{category}:{language}": counts[(category, language)]
             for category in CATEGORIES
-            for language in LANGUAGES
+            for language in checked_languages
         },
         "rubric": RUBRIC,
         "items": review_items,
@@ -331,6 +352,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
     parser.add_argument("--per-category", type=int, default=DEFAULT_PER_CATEGORY)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument(
+        "--languages",
+        nargs="+",
+        choices=LANGUAGES,
+        default=list(LANGUAGES),
+    )
     return parser.parse_args(argv)
 
 
@@ -352,12 +379,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             shards,
             model_id=model_id,
             corpus_texts=corpus_texts,
+            languages=args.languages,
         )
     package, key = build_review_documents(
         entries,
         outputs_by_model,
         per_category=args.per_category,
         seed=args.seed,
+        languages=args.languages,
     )
     atomic_write_json(args.review_output, package)
     atomic_write_json(args.key_output, key)

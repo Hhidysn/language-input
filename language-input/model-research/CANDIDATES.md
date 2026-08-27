@@ -325,6 +325,39 @@ result and the candidate is not advanced to the larger release-selection
 review. The compact machine-readable evidence is
 `model-research/m2m100-12b-screening-v1.json`.
 
+### QuickMT target-language-package route
+
+The Gate-2 shortlist proposed `quickmt/quickmt-zh-en` as the English component
+and, only after English passed, `quickmt/quickmt-en-ja` and
+`quickmt/quickmt-en-es` as the second legs of self-contained Japanese and
+Spanish packages. The English component was pinned at
+`c27cc8024e01a047733a1e34796e2ab19d74b237` under CC BY 4.0. All seven allowed
+runtime files were downloaded individually and verified; they total
+409,706,714 bytes. The `model.bin` SHA256 is
+`e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000`,
+and the complete runtime-file manifest SHA256 is
+`a84705b1ad8bf88738df6d3978ee5e657d29fc0821e231b299b4da6764d7a16a`.
+
+The fixed 320-source English run passed the non-semantic gates with 100%
+ordinary valid coverage, a 49.62 ms warm nine-candidate p95 and a 754,483,200
+byte peak working set. Twenty instruction-, template- or credential-shaped
+sources were deterministically withheld before inference.
+
+The stop-early blind screen mixed 30 QuickMT outputs with 30 outputs from the
+already rejected M2M100 baseline. The package SHA256 is
+`ff524d5166bb1c61007ad529368a6698542b1446177dd83d54386124a75a8764`.
+DeepSeek V4 Flash and GLM-5.2 independently accepted 24/30 (80.0%) and 26/30
+(86.7%) QuickMT items. Their intersection was 24/30 and their union was 26/30,
+so even resolving every disagreement in QuickMT's favor cannot reach the
+frozen 90% English threshold. Both rejected three intentionally suppressed
+safety-shaped rows as missing and rejected `还要` → `And yet.`; they disagreed
+on `都在` → `All in.` and `传` → `Passage`.
+
+QuickMT English is therefore rejected without adjudication. In accordance with
+the approved stop-early rule, the Japanese and Spanish components were not
+downloaded and product integration did not begin. The compact evidence is in
+`model-research/quickmt-zh-en-screening-v1.json`.
+
 ## Screened-out candidates
 
 | Family | Decision | Evidence-based reason |

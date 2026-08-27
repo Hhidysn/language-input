@@ -383,8 +383,8 @@ def summarize_reviews(
         for model_id, model_row in dimensions.items():
             languages = model_row["languages"]
             language_pass = {
-                language: languages[language]["acceptance"] >= threshold
-                for language, threshold in SEMANTIC_THRESHOLDS.items()
+                language: row["acceptance"] >= SEMANTIC_THRESHOLDS[language]
+                for language, row in languages.items()
             }
             final_gate[model_id] = {
                 "languages": language_pass,
