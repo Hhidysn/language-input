@@ -159,6 +159,23 @@ def load_curated(path: Path) -> dict[str, list[dict[str, object]]]:
     return result
 
 
+def load_excluded_texts(paths: Sequence[Path]) -> set[str]:
+    excluded: set[str] = set()
+    for path in paths:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if document.get("format") != FORMAT_VERSION:
+            raise ValueError(f"unsupported exclusion corpus format in {path}")
+        rows = document.get("entries")
+        if not isinstance(rows, list):
+            raise ValueError(f"exclusion corpus has no entries in {path}")
+        for row in rows:
+            text = row.get("text") if isinstance(row, dict) else None
+            if not isinstance(text, str) or not text:
+                raise ValueError(f"invalid exclusion row in {path}")
+            excluded.add(text)
+    return excluded
+
+
 def identity_normalizer(words: Sequence[str]) -> dict[str, str]:
     return {word: word for word in words}
 
@@ -236,6 +253,7 @@ def build_entries(
     *,
     counts: Mapping[str, int] = DEFAULT_COUNTS,
     normalizer: Callable[[Sequence[str]], Mapping[str, str]] = identity_normalizer,
+    excluded_texts: set[str] | frozenset[str] = frozenset(),
 ) -> list[dict[str, object]]:
     expected_categories = set(DEFAULT_COUNTS)
     if set(counts) != expected_categories:
@@ -260,7 +278,10 @@ def build_entries(
     ]
     if duplicates:
         raise ValueError(f"duplicate curated texts: {duplicates}")
-    reserved = set(curated_texts)
+    curated_exclusions = sorted(set(curated_texts) & set(excluded_texts))
+    if curated_exclusions:
+        raise ValueError(f"curated texts reuse excluded sources: {curated_exclusions}")
+    reserved = set(curated_texts) | set(excluded_texts)
 
     ordinary_source = [
         term
@@ -340,6 +361,8 @@ def build_entries(
     texts = [str(row["text"]) for row in entries]
     if len(texts) != len(set(texts)):
         raise ValueError("evaluation entries must be globally unique")
+    if set(texts) & set(excluded_texts):
+        raise AssertionError("evaluation entries overlap an exclusion corpus")
     return entries
 
 
@@ -359,16 +382,19 @@ def build_evaluation_set(
     counts: Mapping[str, int] = DEFAULT_COUNTS,
     normalizer: Callable[[Sequence[str]], Mapping[str, str]] = identity_normalizer,
     provenance: Mapping[str, object] | None = None,
+    exclusion_paths: Sequence[Path] = (),
 ) -> dict[str, object]:
     essay_terms = parse_essay(essay_path)
     gloss_words = parse_glosspack(gloss_path)
     curated = load_curated(curated_path)
+    excluded_texts = load_excluded_texts(exclusion_paths)
     entries = build_entries(
         essay_terms,
         gloss_words,
         curated,
         counts=counts,
         normalizer=normalizer,
+        excluded_texts=excluded_texts,
     )
     corpus = {
         "format": FORMAT_VERSION,
@@ -388,6 +414,10 @@ def build_evaluation_set(
             "file": output_path.name,
             "bytes": output_path.stat().st_size,
             "sha256": sha256_file(output_path),
+        },
+        "exclusions": {
+            "sources": [source_record(path) for path in exclusion_paths],
+            "unique_texts": len(excluded_texts),
         },
     }
     if provenance:
@@ -409,6 +439,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--essay-source-url")
     parser.add_argument("--essay-revision")
     parser.add_argument("--glosspack-source-url")
+    parser.add_argument("--exclude-corpus", action="append", type=Path, default=[])
+    parser.add_argument("--high-frequency-count", type=int, default=120)
+    parser.add_argument("--dictionary-miss-count", type=int, default=80)
+    parser.add_argument("--variant-count", type=int, default=40)
+    parser.add_argument("--ambiguous-count", type=int, default=40)
+    parser.add_argument("--adversarial-count", type=int, default=40)
     return parser.parse_args(argv)
 
 
@@ -446,14 +482,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
         "normalization": normalization,
     }
+    counts = {
+        "high_frequency": args.high_frequency_count,
+        "dictionary_miss": args.dictionary_miss_count,
+        "variant": args.variant_count,
+        "ambiguous": args.ambiguous_count,
+        "adversarial": args.adversarial_count,
+    }
     manifest = build_evaluation_set(
         essay_path=args.essay,
         gloss_path=args.glosspack,
         curated_path=args.curated,
         output_path=args.output,
         manifest_path=args.manifest,
+        counts=counts,
         normalizer=normalizer,
         provenance=provenance,
+        exclusion_paths=args.exclude_corpus,
     )
     print(
         f"built {sum(manifest['counts'].values())} evaluation sources: "

@@ -5,7 +5,10 @@
 using namespace weasel;
 
 ClientImpl::ClientImpl()
-    : session_id(0), channel(GetPipeName()), is_ime(false) {
+    : session_id(0),
+      channel(GetPipeName()),
+      is_ime(false),
+      async_refresh_window(nullptr) {
   _InitializeClientInfo();
 }
 
@@ -62,6 +65,10 @@ bool ClientImpl::ProcessKeyEvent(KeyEvent const& keyEvent) {
   LRESULT ret =
       _SendMessage(WEASEL_IPC_PROCESS_KEY_EVENT, keyEvent, session_id);
   return ret != 0;
+}
+
+void ClientImpl::SetAsyncRefreshWindow(HWND window) {
+  async_refresh_window = window;
 }
 
 bool ClientImpl::CommitComposition() {
@@ -185,6 +192,10 @@ bool ClientImpl::_WriteClientInfo() {
   channel << L"action=session\n";
   channel << L"session.client_app=" << app_name.c_str() << L"\n";
   channel << L"session.client_type=" << (is_ime ? L"ime" : L"tsf") << L"\n";
+  if (!is_ime && async_refresh_window) {
+    channel << L"session.async_refresh_window="
+            << reinterpret_cast<uintptr_t>(async_refresh_window) << L"\n";
+  }
   channel << L".\n";
   return true;
 }
@@ -221,6 +232,10 @@ void Client::ShutdownServer() {
 
 bool Client::ProcessKeyEvent(KeyEvent const& keyEvent) {
   return m_pImpl->ProcessKeyEvent(keyEvent);
+}
+
+void Client::SetAsyncRefreshWindow(HWND window) {
+  m_pImpl->SetAsyncRefreshWindow(window);
 }
 
 bool Client::CommitComposition() {

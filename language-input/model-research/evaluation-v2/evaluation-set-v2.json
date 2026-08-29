@@ -1,0 +1,1044 @@
+{
+  "counts": {
+    "adversarial": 24,
+    "ambiguous": 24,
+    "dictionary_miss": 24,
+    "high_frequency": 24,
+    "variant": 24
+  },
+  "entries": [
+    {
+      "category": "high_frequency",
+      "id": "hf-001",
+      "source": {
+        "kind": "rime-essay",
+        "original": "應該",
+        "t2s": "应该",
+        "weight": 98472
+      },
+      "text": "应该"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-002",
+      "source": {
+        "kind": "rime-essay",
+        "original": "你們",
+        "t2s": "你们",
+        "weight": 96181
+      },
+      "text": "你们"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-003",
+      "source": {
+        "kind": "rime-essay",
+        "original": "覺得",
+        "t2s": "觉得",
+        "weight": 84729
+      },
+      "text": "觉得"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-004",
+      "source": {
+        "kind": "rime-essay",
+        "original": "不能",
+        "t2s": "不能",
+        "weight": 81563
+      },
+      "text": "不能"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-005",
+      "source": {
+        "kind": "rime-essay",
+        "original": "這麼",
+        "t2s": "这么",
+        "weight": 75265
+      },
+      "text": "这么"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-006",
+      "source": {
+        "kind": "rime-essay",
+        "original": "喜歡",
+        "t2s": "喜欢",
+        "weight": 73564
+      },
+      "text": "喜欢"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-007",
+      "source": {
+        "kind": "rime-essay",
+        "original": "不會",
+        "t2s": "不会",
+        "weight": 69592
+      },
+      "text": "不会"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-008",
+      "source": {
+        "kind": "rime-essay",
+        "original": "不要",
+        "t2s": "不要",
+        "weight": 66321
+      },
+      "text": "不要"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-009",
+      "source": {
+        "kind": "rime-essay",
+        "original": "感覺",
+        "t2s": "感觉",
+        "weight": 62458
+      },
+      "text": "感觉"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-010",
+      "source": {
+        "kind": "rime-essay",
+        "original": "看看",
+        "t2s": "看看",
+        "weight": 60666
+      },
+      "text": "看看"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-011",
+      "source": {
+        "kind": "rime-essay",
+        "original": "出來",
+        "t2s": "出来",
+        "weight": 59967
+      },
+      "text": "出来"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-012",
+      "source": {
+        "kind": "rime-essay",
+        "original": "朋友",
+        "t2s": "朋友",
+        "weight": 59782
+      },
+      "text": "朋友"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-013",
+      "source": {
+        "kind": "rime-essay",
+        "original": "明天",
+        "t2s": "明天",
+        "weight": 58948
+      },
+      "text": "明天"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-014",
+      "source": {
+        "kind": "rime-essay",
+        "original": "以後",
+        "t2s": "以后",
+        "weight": 58926
+      },
+      "text": "以后"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-015",
+      "source": {
+        "kind": "rime-essay",
+        "original": "系統",
+        "t2s": "系统",
+        "weight": 57340
+      },
+      "text": "系统"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-016",
+      "source": {
+        "kind": "rime-essay",
+        "original": "一定",
+        "t2s": "一定",
+        "weight": 56966
+      },
+      "text": "一定"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-017",
+      "source": {
+        "kind": "rime-essay",
+        "original": "一起",
+        "t2s": "一起",
+        "weight": 56621
+      },
+      "text": "一起"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-018",
+      "source": {
+        "kind": "rime-essay",
+        "original": "企業",
+        "t2s": "企业",
+        "weight": 55640
+      },
+      "text": "企业"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-019",
+      "source": {
+        "kind": "rime-essay",
+        "original": "市場",
+        "t2s": "市场",
+        "weight": 54956
+      },
+      "text": "市场"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-020",
+      "source": {
+        "kind": "rime-essay",
+        "original": "發展",
+        "t2s": "发展",
+        "weight": 54950
+      },
+      "text": "发展"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-021",
+      "source": {
+        "kind": "rime-essay",
+        "original": "一直",
+        "t2s": "一直",
+        "weight": 54109
+      },
+      "text": "一直"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-022",
+      "source": {
+        "kind": "rime-essay",
+        "original": "北京",
+        "t2s": "北京",
+        "weight": 54109
+      },
+      "text": "北京"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-023",
+      "source": {
+        "kind": "rime-essay",
+        "original": "好像",
+        "t2s": "好像",
+        "weight": 53579
+      },
+      "text": "好像"
+    },
+    {
+      "category": "high_frequency",
+      "id": "hf-024",
+      "source": {
+        "kind": "rime-essay",
+        "original": "事情",
+        "t2s": "事情",
+        "weight": 51952
+      },
+      "text": "事情"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-001",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "好了",
+        "t2s": "好了",
+        "weight": 22364
+      },
+      "text": "好了"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-002",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "也不",
+        "t2s": "也不",
+        "weight": 20076
+      },
+      "text": "也不"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-003",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "一天",
+        "t2s": "一天",
+        "weight": 18744
+      },
+      "text": "一天"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-004",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "還在",
+        "t2s": "还在",
+        "weight": 17322
+      },
+      "text": "还在"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-005",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "很好",
+        "t2s": "很好",
+        "weight": 16862
+      },
+      "text": "很好"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-006",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "還沒",
+        "t2s": "还没",
+        "weight": 16499
+      },
+      "text": "还没"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-007",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "是啊",
+        "t2s": "是啊",
+        "weight": 15392
+      },
+      "text": "是啊"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-008",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "看了",
+        "t2s": "看了",
+        "weight": 15301
+      },
+      "text": "看了"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-009",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "看着",
+        "t2s": "看着",
+        "weight": 15119
+      },
+      "text": "看着"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-010",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "來了",
+        "t2s": "来了",
+        "weight": 15028
+      },
+      "text": "来了"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-011",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "那就",
+        "t2s": "那就",
+        "weight": 14465
+      },
+      "text": "那就"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-012",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "一位",
+        "t2s": "一位",
+        "weight": 13973
+      },
+      "text": "一位"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-013",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "你是",
+        "t2s": "你是",
+        "weight": 13873
+      },
+      "text": "你是"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-014",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "去了",
+        "t2s": "去了",
+        "weight": 13368
+      },
+      "text": "去了"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-015",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "哈哈哈",
+        "t2s": "哈哈哈",
+        "weight": 13291
+      },
+      "text": "哈哈哈"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-016",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "您的",
+        "t2s": "您的",
+        "weight": 13130
+      },
+      "text": "您的"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-017",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "不乖",
+        "t2s": "不乖",
+        "weight": 12970
+      },
+      "text": "不乖"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-018",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "三個",
+        "t2s": "三个",
+        "weight": 12421
+      },
+      "text": "三个"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-019",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "一張",
+        "t2s": "一张",
+        "weight": 12392
+      },
+      "text": "一张"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-020",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "的事",
+        "t2s": "的事",
+        "weight": 12366
+      },
+      "text": "的事"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-021",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "是在",
+        "t2s": "是在",
+        "weight": 12229
+      },
+      "text": "是在"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-022",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "一條",
+        "t2s": "一条",
+        "weight": 11873
+      },
+      "text": "一条"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-023",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "不敢",
+        "t2s": "不敢",
+        "weight": 11831
+      },
+      "text": "不敢"
+    },
+    {
+      "category": "dictionary_miss",
+      "id": "miss-024",
+      "source": {
+        "exact_gloss": false,
+        "kind": "rime-essay",
+        "normalized_gloss": false,
+        "original": "都要",
+        "t2s": "都要",
+        "weight": 11739
+      },
+      "text": "都要"
+    },
+    {
+      "category": "variant",
+      "id": "var-001",
+      "pair": "hail-taxi",
+      "region": "mainland-simplified",
+      "text": "打车"
+    },
+    {
+      "category": "variant",
+      "id": "var-002",
+      "pair": "hail-taxi",
+      "region": "taiwan-traditional",
+      "text": "叫車"
+    },
+    {
+      "category": "variant",
+      "id": "var-003",
+      "pair": "account",
+      "region": "mainland-simplified",
+      "text": "账号"
+    },
+    {
+      "category": "variant",
+      "id": "var-004",
+      "pair": "account",
+      "region": "taiwan-traditional",
+      "text": "帳號"
+    },
+    {
+      "category": "variant",
+      "id": "var-005",
+      "pair": "text-message",
+      "region": "mainland-simplified",
+      "text": "短信"
+    },
+    {
+      "category": "variant",
+      "id": "var-006",
+      "pair": "text-message",
+      "region": "taiwan-traditional",
+      "text": "簡訊"
+    },
+    {
+      "category": "variant",
+      "id": "var-007",
+      "pair": "hard-drive",
+      "region": "mainland-simplified",
+      "text": "硬盘"
+    },
+    {
+      "category": "variant",
+      "id": "var-008",
+      "pair": "hard-drive",
+      "region": "taiwan-traditional",
+      "text": "硬碟"
+    },
+    {
+      "category": "variant",
+      "id": "var-009",
+      "pair": "database",
+      "region": "mainland-simplified",
+      "text": "数据库"
+    },
+    {
+      "category": "variant",
+      "id": "var-010",
+      "pair": "database",
+      "region": "taiwan-traditional",
+      "text": "資料庫"
+    },
+    {
+      "category": "variant",
+      "id": "var-011",
+      "pair": "cloud-computing",
+      "region": "mainland-simplified",
+      "text": "云计算"
+    },
+    {
+      "category": "variant",
+      "id": "var-012",
+      "pair": "cloud-computing",
+      "region": "taiwan-traditional",
+      "text": "雲端運算"
+    },
+    {
+      "category": "variant",
+      "id": "var-013",
+      "pair": "recycle-bin",
+      "region": "mainland-simplified",
+      "text": "回收站"
+    },
+    {
+      "category": "variant",
+      "id": "var-014",
+      "pair": "recycle-bin",
+      "region": "taiwan-traditional",
+      "text": "資源回收筒"
+    },
+    {
+      "category": "variant",
+      "id": "var-015",
+      "pair": "instant-noodles",
+      "region": "mainland-simplified",
+      "text": "方便面"
+    },
+    {
+      "category": "variant",
+      "id": "var-016",
+      "pair": "instant-noodles",
+      "region": "taiwan-traditional",
+      "text": "泡麵"
+    },
+    {
+      "category": "variant",
+      "id": "var-017",
+      "pair": "potato",
+      "region": "mainland-simplified",
+      "text": "土豆"
+    },
+    {
+      "category": "variant",
+      "id": "var-018",
+      "pair": "potato",
+      "region": "taiwan-traditional",
+      "text": "馬鈴薯"
+    },
+    {
+      "category": "variant",
+      "id": "var-019",
+      "pair": "pineapple",
+      "region": "mainland-simplified",
+      "text": "菠萝"
+    },
+    {
+      "category": "variant",
+      "id": "var-020",
+      "pair": "pineapple",
+      "region": "taiwan-traditional",
+      "text": "鳳梨"
+    },
+    {
+      "category": "variant",
+      "id": "var-021",
+      "pair": "bus",
+      "region": "mainland-simplified",
+      "text": "公交车"
+    },
+    {
+      "category": "variant",
+      "id": "var-022",
+      "pair": "bus",
+      "region": "taiwan-traditional",
+      "text": "公車"
+    },
+    {
+      "category": "variant",
+      "id": "var-023",
+      "pair": "power-bank",
+      "region": "mainland-simplified",
+      "text": "充电宝"
+    },
+    {
+      "category": "variant",
+      "id": "var-024",
+      "pair": "power-bank",
+      "region": "taiwan-traditional",
+      "text": "行動電源"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-001",
+      "note": "want, need, or important",
+      "text": "要"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-002",
+      "note": "give or for",
+      "text": "给"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-003",
+      "note": "hit, make, or play",
+      "text": "打"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-004",
+      "note": "open, start, or drive",
+      "text": "开"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-005",
+      "note": "above, on, or go up",
+      "text": "上"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-006",
+      "note": "below, next, or go down",
+      "text": "下"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-007",
+      "note": "pass, cross, or experiential particle",
+      "text": "过"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-008",
+      "note": "white, plain, or in vain",
+      "text": "白"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-009",
+      "note": "clear, pure, or Qing dynasty",
+      "text": "清"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-010",
+      "note": "life, raw, or give birth",
+      "text": "生"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-011",
+      "note": "ripe, cooked, or familiar",
+      "text": "熟"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-012",
+      "note": "flower, spend, or pattern",
+      "text": "花"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-013",
+      "note": "machine, opportunity, or secret",
+      "text": "机"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-014",
+      "note": "face, surface, or noodles",
+      "text": "面"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-015",
+      "note": "table, form, or express",
+      "text": "表"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-016",
+      "note": "point, dot, or order",
+      "text": "点"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-017",
+      "note": "door, gate, or classifier",
+      "text": "门"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-018",
+      "note": "fire, popular, or become angry",
+      "text": "火"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-019",
+      "note": "water or liquid",
+      "text": "水"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-020",
+      "note": "air, gas, or anger",
+      "text": "气"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-021",
+      "note": "listen or obey",
+      "text": "听"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-022",
+      "note": "report, newspaper, or repay",
+      "text": "报"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-023",
+      "note": "resemble or image",
+      "text": "像"
+    },
+    {
+      "category": "ambiguous",
+      "id": "amb-024",
+      "note": "fast, soon, or pleasant",
+      "text": "快"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-001",
+      "kind": "mixed",
+      "text": "AI翻译"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-002",
+      "kind": "mixed",
+      "text": "PDF文件"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-003",
+      "kind": "mixed",
+      "text": "Python脚本"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-004",
+      "kind": "mixed",
+      "text": "Android手机"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-005",
+      "kind": "mixed",
+      "text": "Windows电脑"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-006",
+      "kind": "mixed",
+      "text": "USB接口"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-007",
+      "kind": "mixed",
+      "text": "Git提交"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-008",
+      "kind": "mixed",
+      "text": "CPU温度"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-009",
+      "kind": "mixed",
+      "text": "GPU显存"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-010",
+      "kind": "mixed",
+      "text": "Docker容器"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-011",
+      "kind": "mixed",
+      "text": "JSON配置"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-012",
+      "kind": "mixed",
+      "text": "HTTPS请求"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-013",
+      "kind": "mixed",
+      "text": "IPv6地址"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-014",
+      "kind": "mixed",
+      "text": "4K视频"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-015",
+      "kind": "mixed",
+      "text": "5G网络"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-016",
+      "kind": "mixed",
+      "text": "C盘空间"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-017",
+      "kind": "mixed",
+      "text": "Excel表格"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-018",
+      "kind": "mixed",
+      "text": "Word文档"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-019",
+      "kind": "mixed",
+      "text": "RTX显卡"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-020",
+      "kind": "mixed",
+      "text": "AMD处理器"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-021",
+      "kind": "mixed",
+      "text": "Intel芯片"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-022",
+      "kind": "mixed",
+      "text": "二维码"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-023",
+      "kind": "mixed",
+      "text": "App更新"
+    },
+    {
+      "category": "adversarial",
+      "id": "adv-024",
+      "kind": "mixed",
+      "text": "WiFi信号"
+    }
+  ],
+  "format": "language-input-model-evaluation-v1"
+}

@@ -196,6 +196,13 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   void _Reconnect();
   std::wstring _GetRootDir();
+  BOOL _InitAsyncRefreshWindow();
+  void _UninitAsyncRefreshWindow();
+  void _OnAsyncGlossReady();
+  static LRESULT CALLBACK _AsyncRefreshWindowProc(HWND window,
+                                                  UINT message,
+                                                  WPARAM wParam,
+                                                  LPARAM lParam);
 
   bool isImmersive() const {
     return (_activateFlags & TF_TMF_IMMERSIVEMODE) != 0;
@@ -234,6 +241,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   com_ptr<ITfContext> _sensitive_context;
   bool _input_scope_known = false;
   bool _input_scope_sensitive = false;
+  HWND _async_refresh_window = nullptr;
 
   /* IME status */
   weasel::Status _status;

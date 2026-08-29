@@ -30,6 +30,7 @@ from benchmark_local_model import (  # noqa: E402
 )
 from benchmark_translation_route import (  # noqa: E402
     ROUTE_FORMAT,
+    combine_hypotheses,
     load_route_config,
     validate_hypotheses,
     validate_translations,
@@ -58,6 +59,7 @@ from aggregate_semantic_reviews import (  # noqa: E402
     summarize_reviews,
     validate_package_and_key,
 )
+from evaluate_security_filter import evaluate_rows, load_rows  # noqa: E402
 
 
 class EvaluationSetBuilderTests(unittest.TestCase):
@@ -94,6 +96,33 @@ class EvaluationSetBuilderTests(unittest.TestCase):
             [row["text"] for row in entries],
         )
         self.assertEqual("dictionary_miss", entries[1]["category"])
+
+    def test_builder_excludes_every_prior_corpus_text(self) -> None:
+        terms = [
+            EssayTerm("旧词", Decimal(100)),
+            EssayTerm("新词", Decimal(90)),
+            EssayTerm("长尾", Decimal(80)),
+        ]
+        curated = {
+            "variant": [{"text": "异体"}],
+            "ambiguous": [{"text": "行"}],
+            "adversarial": [{"text": "AI翻译"}],
+        }
+        entries = build_entries(
+            terms,
+            set(),
+            curated,
+            counts={
+                "high_frequency": 1,
+                "dictionary_miss": 1,
+                "variant": 1,
+                "ambiguous": 1,
+                "adversarial": 1,
+            },
+            excluded_texts={"旧词"},
+        )
+        self.assertEqual("新词", entries[0]["text"])
+        self.assertNotIn("旧词", {row["text"] for row in entries})
 
     def test_han_filter_rejects_mixed_terms(self) -> None:
         self.assertTrue(is_ordinary_chinese_term("本地模型"))
@@ -391,6 +420,13 @@ class BenchmarkClientTests(unittest.TestCase):
                 self.assertTrue(is_unsafe_source(row["text"]), row)
         self.assertFalse(is_unsafe_source("本地翻译模型"))
 
+    def test_version_two_security_fixture_has_perfect_recall_and_specificity(self) -> None:
+        fixture = ROOT / "language-input/model-research/evaluation-v2/security-v2.json"
+        summary = evaluate_rows(load_rows(fixture))
+        self.assertTrue(summary["passed"])
+        self.assertEqual(1.0, summary["unsafe_recall"])
+        self.assertEqual(1.0, summary["safe_specificity"])
+
     def test_summary_counts_a_failed_batch_as_zero_accepted_glosses(self) -> None:
         entries = [
             {"text": "常用", "category": "high_frequency"},
@@ -507,6 +543,18 @@ class BenchmarkClientTests(unittest.TestCase):
 
 
 class TranslationRouteBenchmarkTests(unittest.TestCase):
+    def test_dual_gloss_combiner_deduplicates_and_enforces_total_length(self) -> None:
+        combined = combine_hypotheses(
+            {
+                "传": ["Transmit.", "transmit", "Biography"],
+                "长词": ["x" * 35, "second meaning"],
+            },
+            max_glosses=2,
+            max_characters=40,
+        )
+        self.assertEqual("Transmit; Biography", combined["传"])
+        self.assertEqual("x" * 35, combined["长词"])
+
     def test_translation_validation_is_exact_and_rejects_candidate_row_hazards(self) -> None:
         outputs, error = validate_translations(["人工智能", "文件夹"], [" AI ", "folder"])
         self.assertIsNone(error)
@@ -543,6 +591,27 @@ class TranslationRouteBenchmarkTests(unittest.TestCase):
             ({}, "hypothesis-count-mismatch"),
             validate_hypotheses(["还要"], [["More"]], expected_count=2),
         )
+
+    def test_hypothesis_validation_drops_bad_beams_without_losing_batch(self) -> None:
+        hypotheses, error = validate_hypotheses(
+            ["企业", "单字"],
+            [["enterprise", "x" * 41], ["bad\nvalue", ""]],
+            expected_count=2,
+        )
+        self.assertIsNone(error)
+        self.assertEqual({"企业": ["enterprise"]}, hypotheses)
+
+    def test_japanese_hypothesis_selection_prefers_target_script_and_deduplicates(self) -> None:
+        combined = combine_hypotheses(
+            {
+                "一定": ["It Must Be", "きっと", "きっときっと", "Sure"],
+                "企业": ["エンタープライズエンタープライズ", "Enterprise"],
+            },
+            max_glosses=2,
+            language="ja",
+        )
+        self.assertEqual("きっと; It Must Be", combined["一定"])
+        self.assertEqual("エンタープライズ; Enterprise", combined["企业"])
 
     def test_route_loader_pins_models_and_rejects_wrong_m2m_language(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

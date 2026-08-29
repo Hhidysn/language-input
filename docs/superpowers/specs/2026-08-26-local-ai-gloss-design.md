@@ -1,7 +1,7 @@
 # Language Input v0.2: local-AI gloss design
 
 Date: 2026-08-26  
-Status: user-confirmed design
+Status: user-confirmed design, revised 2026-08-29 for practical preview
 
 ## 1. Product decision
 
@@ -17,9 +17,10 @@ confirmed control model supersedes the earlier AI-only idea:
 - speech remains independently selectable, but speaks only a gloss that is
   currently enabled and available.
 
-The local-AI path never calls a remote large model during typing. The inference
-runtime ships in the signed core installer, while the 1–2 GB model is installed
-later through the settings tool or an offline model pack.
+The local-AI path never calls a remote large model during typing. The signed
+core installer carries the inference runtime; the English base component and
+optional Japanese or Spanish component are installed later on demand or from
+offline model packs. Each component remains below 1–2 GB.
 
 ## 2. Goals
 
@@ -118,16 +119,19 @@ returned before any AI work begins.
 
 ### 6.2 Local inference process
 
-The installer contains a source-built, pinned and signed x64
-`LanguageInputModelHost.exe` based on `llama.cpp`'s GGUF inference and
-OpenAI-compatible server implementation. It:
+The installer contains a signed x64 `LanguageInputModelHost.exe` using pinned
+CTranslate2 4.8.1 and SentencePiece 0.2.1. It loads verified QuickMT INT8
+components and:
 
 - binds only to `127.0.0.1` on an operating-system-selected port;
 - requires a new random bearer token for every launch;
-- receives only the current batch of Chinese candidate strings, the selected
-  target language and a versioned system prompt;
-- uses a dynamically generated JSON schema or grammar that permits exactly the
-  requested keys and single-line string values;
+- receives only the current batch of Chinese candidate strings and selected
+  target language;
+- translates English directly through `quickmt-zh-en`, and Japanese or Spanish
+  through that shared English stage plus the requested target component;
+- requests up to four beams, drops invalid beams individually, prefers
+  target-script output for Japanese, removes exact repetition artifacts, and
+  displays no more than two distinct glosses within 40 characters;
 - is placed in a Windows Job Object with kill-on-close semantics;
 - is started only when AI gloss display is active and a valid model is
   selected;
@@ -148,9 +152,9 @@ The catalog is a versioned JSON file shipped in the signed installer. Updating
 the supported catalog therefore requires a product update; the typing process
 does not trust a network-fetched catalog. Each entry fixes:
 
-- model ID and display name;
+- route/component ID and display name;
 - upstream repository and immutable download URL;
-- model and quantization version;
+- model, dependency and quantization version;
 - exact byte size and SHA256;
 - license identifier, attribution and redistribution decision;
 - supported languages and minimum RAM;
@@ -174,9 +178,10 @@ the model host.
 
 ### 6.4 Offline model-pack format
 
-The redistributable model uses a `.limodel` ZIP container with stored rather
-than recompressed GGUF bytes. It contains one root-level manifest, the GGUF
-file and required license/attribution files. Import rejects absolute paths,
+Each redistributable component uses a `.limodel` ZIP container with stored
+rather than recompressed model bytes. It contains one root-level manifest,
+the exact CTranslate2 model/tokenizer files and required license/attribution
+files. Import rejects absolute paths,
 parent traversal, unexpected file names, duplicate entries, reparse points,
 size mismatches and catalog/hash mismatches before activation.
 
@@ -255,40 +260,27 @@ F:\documents\.i-wish-research\language-input-ai-models-20260826
 Before downloading, the workflow verifies the resolved child path, reparse
 points, estimated bytes and free space. The user-approved hard limits are:
 
-- cumulative network downloads: 20 GiB;
+- cumulative network downloads: 30 GiB;
 - total research directory size: 30 GiB;
 - candidate count: not predetermined;
 - stop early once evidence identifies a stable winner.
 
-Candidates must be current, provenance-verifiable, compatible with pinned
-`llama.cpp`, between 1.0 and 2.0 GiB in the tested GGUF quantization, usable on
-an 8 GB CPU-only machine, multilingual for
-Chinese-to-English/Japanese/Spanish, and license-compatible with the intended
-distribution.
+Components must be current, provenance-verifiable, compatible with pinned
+CTranslate2, no larger than 1–2 GB each, usable on an 8 GB CPU-only machine,
+cover Chinese-to-English/Japanese/Spanish through independently downloadable
+language components, and be license-compatible with the intended distribution.
 
-All candidates use the same runtime build, prompt, thread policy, context,
-batch and sampling settings. The 320-item evaluation corpus contains:
+All route components use the same runtime build, thread policy, batch and beam
+settings. The revised non-overlapping practical corpus contains 120 items,
+balanced across five input-method categories. A separate 76-item safety set
+contains 40 unsafe and 36 safe shapes.
 
-- 120 Rime high-frequency candidates;
-- 80 fixed-dictionary misses including compounds, new terms and proper names;
-- 40 simplified/traditional/variant cases;
-- 40 ambiguous or polysemous words;
-- 40 mixed-character and prompt-injection-shaped adversarial inputs.
-
-Every candidate produces English, Japanese and Spanish output, exactly 960
-translations per model. Evaluation covers semantic correctness, concision,
-target-language correctness, JSON/key stability, hallucination,
-prompt-injection resistance, cold and warm latency, peak working set and
-license/provenance. License and redistribution eligibility are hard gates, not
-quality-score bonuses.
-
-Full-corpus checks measure structure, coverage, latency and memory. Semantic
-acceptance uses a fixed rubric on a stratified 120-source subset: 24 sources
-from each of the five corpus groups, producing 360 translations per model.
-Model identities and output order are hidden from two independent multilingual
-reviewers. Disagreements are adjudicated against cited, versioned bilingual
-references before acceptance rates are calculated; an uncorroborated score
-from a single automatic judge cannot select the release model.
+Full-corpus checks measure valid output coverage, latency, memory and
+target-script shape. Semantic samples are advisory because the output is an
+optional vocabulary hint, not an authoritative dictionary or language exam.
+Known mistranslation risks remain visible in the report and UI. Safety is
+scored independently and remains a hard gate. License and redistribution
+eligibility are also hard gates.
 
 ## 11. Acceptance criteria
 
@@ -301,8 +293,8 @@ from a single automatic judge cannot select the release model.
    result becomes available.
 5. Exact JSON/key validation succeeds for at least 99% of evaluation batches.
 6. At least 95% of eligible ordinary evaluation terms receive a valid gloss.
-7. Blind semantic acceptance is at least 90% for English and 85% for Japanese
-   and Spanish.
+7. Practical samples disclose short-word, ambiguity and English-pivot errors;
+   every generated gloss is visibly marked `AI` and can be disabled immediately.
 8. Sensitive-scope model calls, cache reads/writes, displayed glosses and
    spoken glosses are all zero.
 9. Packet/process monitoring finds no external network request during typing;
@@ -311,13 +303,13 @@ from a single automatic judge cannot select the release model.
     x64 and serves both client paths through the existing Weasel architecture.
 11. The installer, embedded uninstaller and every first-party executable are
     signed and verified.
-12. The installer contains the model runtime, catalog and notices but no GGUF
-    model; the separate `.limodel` pack passes manifest, path, size, hash and
+12. The installer contains the model runtime, catalog and notices but no model
+    weights; each separate `.limodel` pack passes manifest, path, size, hash and
     license audits.
 
-If no candidate satisfies all hard gates, the release does not silently lower
-them. The research report records the failed gates and the model-selection
-decision returns for user review.
+The 2026-08-29 user-approved revision changed only examination-style semantic
+thresholds. Privacy, safety, latency, memory, integrity, signing and explicit
+AI labeling remain hard requirements.
 
 ## 12. Verification plan
 
@@ -338,8 +330,8 @@ decision returns for user review.
   path traversal, duplicate archive entry and offline import;
 - x64/Win32 full-pinyin and Xiaohe sessions;
 - local typing performance and model-host memory/latency benchmarks;
-- package contents, zero user databases, notices, signatures and absence of a
-  bundled GGUF model.
+- package contents, zero user databases, notices, signatures and absence of
+  bundled model weights.
 
 ### Runtime tests
 
@@ -359,7 +351,8 @@ decision returns for user review.
 - model provenance, benchmark and selection reports;
 - an updated Chinese README and privacy notice;
 - a signed core installer without model weights;
-- one verified `.limodel` offline model package when redistribution is allowed;
+- verified English, Japanese and Spanish `.limodel` component packages when
+  redistribution is allowed;
 - SHA256 values and a final verification record for both artifacts.
 
 No public GitHub Release is created without a separate user instruction.

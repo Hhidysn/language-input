@@ -30,6 +30,7 @@ int WeaselServerApp::Run() {
   m_ui.Create(m_server.GetHWnd());
 
   m_handler->Initialize();
+  m_handler->SetAsyncRefreshWindow(m_server.GetHWnd());
   m_handler->OnUpdateUI([this]() { tray_icon.Refresh(); });
 
   tray_icon.Create(m_server.GetHWnd());

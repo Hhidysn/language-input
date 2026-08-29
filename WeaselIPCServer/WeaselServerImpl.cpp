@@ -131,6 +131,15 @@ LRESULT ServerImpl::OnCommand(UINT uMsg,
   return 0;
 }
 
+LRESULT ServerImpl::OnLanguageInputGlossReady(UINT,
+                                              WPARAM wParam,
+                                              LPARAM,
+                                              BOOL&) {
+  if (m_pRequestHandler)
+    m_pRequestHandler->RefreshAsync(static_cast<uintptr_t>(wParam));
+  return 0;
+}
+
 DWORD ServerImpl::OnCommand(WEASEL_IPC_COMMAND uMsg,
                             DWORD wParam,
                             DWORD lParam) {

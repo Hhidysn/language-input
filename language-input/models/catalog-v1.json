@@ -1,15 +1,14 @@
 {
   "schema_version": 1,
-  "catalog_state": "evaluation",
-  "generated_at": "2026-08-27T19:41:48+08:00",
-  "selected_model_id": null,
+  "catalog_state": "selected-practical-preview",
+  "generated_at": "2026-08-29T15:15:00+08:00",
+  "selected_model_id": "quickmt-gloss-route-v2",
   "runtime": {
-    "name": "llama.cpp",
-    "release": "v0.3.0",
-    "commit": "c1d0e7a004015f23bc0233470b747b596f29b264",
-    "source_url": "https://github.com/ggml-org/llama.cpp/tree/c1d0e7a004015f23bc0233470b747b596f29b264",
+    "name": "CTranslate2",
+    "release": "4.8.1",
+    "source_url": "https://github.com/OpenNMT/CTranslate2/tree/v4.8.1",
     "license": "MIT",
-    "license_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/c1d0e7a004015f23bc0233470b747b596f29b264/LICENSE"
+    "tokenizer": "sentencepiece 0.2.1"
   },
   "evaluation_contract": {
     "prompt_version": "language-input-gloss-v1",
@@ -18,24 +17,21 @@
       "language-input-translation-v7-plain-single"
     ],
     "languages": ["en", "ja", "es"],
-    "source_count": 320,
-    "translations_per_model": 960,
+    "source_count": 120,
+    "translations_per_route": 360,
     "max_model_file_bytes": 2147483648,
     "max_peak_working_set_bytes": 3758096384,
     "max_warm_batch_p95_ms": 3000,
     "min_exact_json_key_success": 0.99,
     "min_valid_gloss_coverage": 0.95,
-    "min_semantic_acceptance": {
-      "en": 0.9,
-      "ja": 0.85,
-      "es": 0.85
-    }
+    "semantic_review_mode": "advisory-practical-sampling",
+    "safety_scored_separately": true
   },
   "research_accounting": {
     "network_cap_bytes": 32212254720,
-    "network_accounted_bytes": 22869139657,
+    "network_accounted_bytes": 23801966969,
     "research_occupancy_cap_bytes": 32212254720,
-    "research_occupancy_bytes": 23415168465,
+    "research_occupancy_bytes": 27458951625,
     "next_candidate_projected_network_bytes": null,
     "next_candidate_requires_cap_confirmation": false
   },
@@ -258,42 +254,74 @@
       ]
     },
     {
-      "id": "quickmt-zh-en-c27cc802",
-      "state": "failed-semantic-gate-stop-early",
-      "upstream_repository": "quickmt/quickmt-zh-en",
-      "upstream_revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+      "id": "quickmt-gloss-route-v2",
+      "state": "selected-practical-preview",
+      "upstream_repository": "quickmt",
       "license": "CC-BY-4.0",
       "runtime": {
         "ctranslate2": "4.8.1",
         "sentencepiece": "0.2.1",
         "quantization": "int8",
-        "beam_size": 4
+        "beam_size": 4,
+        "num_hypotheses": 4,
+        "max_displayed_glosses": 2
       },
-      "runtime_files_bytes": 409706714,
-      "model_bin_sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
-      "runtime_manifest_sha256": "a84705b1ad8bf88738df6d3978ee5e657d29fc0821e231b299b4da6764d7a16a",
-      "benchmark": {
-        "corpus": "evaluation-v1",
-        "ordinary_valid_coverage": 1.0,
-        "warm_nine_candidate_p95_ms": 49.62160000286531,
-        "peak_working_set_bytes": 754483200,
-        "deterministic_safety_suppressed": 20
-      },
-      "blind_review_package_sha256": "ff524d5166bb1c61007ad529368a6698542b1446177dd83d54386124a75a8764",
-      "semantic_acceptance": {
-        "en_reviewer_a": 0.8,
-        "en_reviewer_b": 0.8666666666666667
-      },
-      "optimistic_semantic_upper_bound": {
-        "en": 0.8666666666666667
-      },
-      "screening_report": "language-input/model-research/quickmt-zh-en-screening-v1.json",
-      "hard_gate_failures": [
-        "semantic-en"
+      "components": [
+        {
+          "id": "quickmt-zh-en",
+          "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+          "runtime_files_bytes": 409706714,
+          "model_bin_sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+          "runtime_manifest_sha256": "a84705b1ad8bf88738df6d3978ee5e657d29fc0821e231b299b4da6764d7a16a",
+          "provides": ["en"]
+        },
+        {
+          "id": "quickmt-en-ja",
+          "revision": "c09e98b8438a239a8210060114cea19c426c0559",
+          "runtime_files_bytes": 403639226,
+          "model_bin_sha256": "a2653ed557273846433473e87bc35e482d956dd529be02faafc0ab9597816585",
+          "runtime_manifest_sha256": "1137fc412bdb1039dc34d6171a07d9ca2910967e379372028791548c9067fb08",
+          "provides": ["ja"],
+          "depends_on": ["quickmt-zh-en"]
+        },
+        {
+          "id": "quickmt-en-es",
+          "revision": "430b78899a30bf5a867dffd407c64b028bbaebf4",
+          "runtime_files_bytes": 403605899,
+          "model_bin_sha256": "a609e71626f9629e7d8cbf76f0961b32f87268e1e4e9548c3ef2de061dece10e",
+          "runtime_manifest_sha256": "204bd601bf1d2c31152991e5012b21efa9b409f9e6f00bfb79de5aa8c38c11c2",
+          "provides": ["es"],
+          "depends_on": ["quickmt-zh-en"]
+        }
       ],
-      "stop_early_not_downloaded": [
-        "quickmt-en-ja",
-        "quickmt-en-es"
+      "benchmark": {
+        "corpus": "evaluation-v2",
+        "ordinary_valid_coverage": {
+          "en": 1.0,
+          "ja": 0.9895833333333334,
+          "es": 1.0
+        },
+        "warm_nine_candidate_p95_ms": {
+          "en": 39.073100000678096,
+          "ja": 207.21290000074077,
+          "es": 121.47229999936826
+        },
+        "peak_working_set_bytes": {
+          "en": 753893376,
+          "ja": 953085952,
+          "es": 952537088
+        },
+        "security": {
+          "unsafe_suppressed": 40,
+          "unsafe_recall": 1.0,
+          "safe_specificity": 1.0
+        }
+      },
+      "practical_report": "language-input/model-research/quickmt-practical-v2.json",
+      "known_limitations": [
+        "Short and ambiguous Chinese words can receive a contextually wrong gloss.",
+        "Japanese and Spanish use an English pivot and can preserve an English sense error.",
+        "AI markers and the independent display switch are required; outputs are vocabulary hints, not authoritative definitions."
       ]
     }
   ]

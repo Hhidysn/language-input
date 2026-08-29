@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "decision": "selected-practical-preview",
+  "decision_date": "2026-08-29",
+  "route_id": "quickmt-gloss-route-v2",
+  "evaluation_contract": {
+    "corpus": "evaluation-v2",
+    "source_count": 120,
+    "purpose": "input-method vocabulary hints rather than language-exam grading",
+    "hard_checks": [
+      "valid gloss coverage",
+      "warm nine-candidate latency",
+      "peak working set",
+      "deterministic unsafe-source suppression"
+    ],
+    "semantic_review": "advisory practical sampling"
+  },
+  "components": [
+    {
+      "id": "quickmt-zh-en",
+      "repository": "quickmt/quickmt-zh-en",
+      "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+      "runtime_files_bytes": 409706714,
+      "model_bin_sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+      "runtime_manifest_sha256": "a84705b1ad8bf88738df6d3978ee5e657d29fc0821e231b299b4da6764d7a16a"
+    },
+    {
+      "id": "quickmt-en-ja",
+      "repository": "quickmt/quickmt-en-ja",
+      "revision": "c09e98b8438a239a8210060114cea19c426c0559",
+      "runtime_files_bytes": 403639226,
+      "model_bin_sha256": "a2653ed557273846433473e87bc35e482d956dd529be02faafc0ab9597816585",
+      "runtime_manifest_sha256": "1137fc412bdb1039dc34d6171a07d9ca2910967e379372028791548c9067fb08",
+      "depends_on": "quickmt-zh-en"
+    },
+    {
+      "id": "quickmt-en-es",
+      "repository": "quickmt/quickmt-en-es",
+      "revision": "430b78899a30bf5a867dffd407c64b028bbaebf4",
+      "runtime_files_bytes": 403605899,
+      "model_bin_sha256": "a609e71626f9629e7d8cbf76f0961b32f87268e1e4e9548c3ef2de061dece10e",
+      "runtime_manifest_sha256": "204bd601bf1d2c31152991e5012b21efa9b409f9e6f00bfb79de5aa8c38c11c2",
+      "depends_on": "quickmt-zh-en"
+    }
+  ],
+  "results": {
+    "en": {
+      "ordinary_coverage": 1.0,
+      "warm_nine_p95_ms": 39.073100000678096,
+      "peak_working_set_bytes": 753893376,
+      "summary_sha256": "3791b77ce02bb78f38f325385b69c39b7ebeb7d8b92df703e542df82840a0f8f"
+    },
+    "ja": {
+      "ordinary_coverage": 0.9895833333333334,
+      "warm_nine_p95_ms": 207.21290000074077,
+      "peak_working_set_bytes": 953085952,
+      "summary_sha256": "ff04d5957a4427d9a85b1c610b4fb630db7d22e19505f93571b83b514c1a08f3"
+    },
+    "es": {
+      "ordinary_coverage": 1.0,
+      "warm_nine_p95_ms": 121.47229999936826,
+      "peak_working_set_bytes": 952537088,
+      "summary_sha256": "c396e370b3331768b3ce02b377faad81416a5f90d8d6af4ba05da4a3ff0dca60"
+    },
+    "security": {
+      "unsafe_entries": 40,
+      "unsafe_suppressed": 40,
+      "safe_entries": 36,
+      "safe_allowed": 36,
+      "summary_sha256": "afdcaed6d5525800b0288648ea4162b7d9a94518555d56f62c0eb59dfb488b0b"
+    }
+  },
+  "output_policy": {
+    "max_hypotheses": 4,
+    "max_displayed_glosses": 2,
+    "max_total_characters": 40,
+    "drop_invalid_hypotheses_individually": true,
+    "prefer_target_script_for_japanese": true,
+    "collapse_exact_repetition": true,
+    "dictionary_fallback_in_ai_mode": false
+  },
+  "redistributable_packs": {
+    "index": "language-input/models/packs-v2.json",
+    "artifact_directory": "F:/documents/.i-wish-research/language-input-ai-models-20260826/artifacts/quickmt-limodel-v2",
+    "artifacts": [
+      {
+        "component_id": "quickmt-zh-en",
+        "file_name": "quickmt-zh-en-c27cc802.limodel",
+        "bytes": 409710191,
+        "sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+        "audit": "passed"
+      },
+      {
+        "component_id": "quickmt-en-ja",
+        "file_name": "quickmt-en-ja-c09e98b8.limodel",
+        "bytes": 403642726,
+        "sha256": "e08181424a18a1f85b35f7e51a1e84dc78ece081bf2df31c9958d4a4036bba67",
+        "audit": "passed",
+        "requires": ["quickmt-zh-en"]
+      },
+      {
+        "component_id": "quickmt-en-es",
+        "file_name": "quickmt-en-es-430b7889.limodel",
+        "bytes": 403609399,
+        "sha256": "561c1434de457aad9e750ec79b99a1ef6991fcf6a8ab96aa6181afad18a9a0b2",
+        "audit": "passed",
+        "requires": ["quickmt-zh-en"]
+      }
+    ]
+  },
+  "known_limitations": [
+    "QuickMT is a sentence translation model; isolated short or polysemous candidates can be mistranslated.",
+    "Japanese and Spanish are English-pivot routes, so a wrong English sense can propagate.",
+    "Traditional or regional vocabulary can be weaker than common Simplified Chinese.",
+    "The UI must retain an AI source marker and a separate off switch."
+  ]
+}

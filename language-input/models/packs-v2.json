@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "format": "language-input-model-pack-v1",
+  "route_id": "quickmt-gloss-route-v2",
+  "runtime": {
+    "host": "LanguageInputModelHost",
+    "architecture": "x64",
+    "ctranslate2": "4.8.1",
+    "sentencepiece": "0.2.1"
+  },
+  "components": [
+    {
+      "id": "quickmt-zh-en",
+      "display_name": "英语 AI 释义基础包",
+      "file_name": "quickmt-zh-en-c27cc802.limodel",
+      "file_size": 409710191,
+      "file_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+      "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+      "provides": ["en"],
+      "requires": [],
+      "license": "CC-BY-4.0"
+    },
+    {
+      "id": "quickmt-en-ja",
+      "display_name": "日语 AI 释义增量包",
+      "file_name": "quickmt-en-ja-c09e98b8.limodel",
+      "file_size": 403642726,
+      "file_sha256": "e08181424a18a1f85b35f7e51a1e84dc78ece081bf2df31c9958d4a4036bba67",
+      "revision": "c09e98b8438a239a8210060114cea19c426c0559",
+      "provides": ["ja"],
+      "requires": ["quickmt-zh-en"],
+      "license": "CC-BY-4.0"
+    },
+    {
+      "id": "quickmt-en-es",
+      "display_name": "西班牙语 AI 释义增量包",
+      "file_name": "quickmt-en-es-430b7889.limodel",
+      "file_size": 403609399,
+      "file_sha256": "561c1434de457aad9e750ec79b99a1ef6991fcf6a8ab96aa6181afad18a9a0b2",
+      "revision": "430b78899a30bf5a867dffd407c64b028bbaebf4",
+      "provides": ["es"],
+      "requires": ["quickmt-zh-en"],
+      "license": "CC-BY-4.0"
+    }
+  ],
+  "routes": {
+    "en": ["quickmt-zh-en"],
+    "ja": ["quickmt-zh-en", "quickmt-en-ja"],
+    "es": ["quickmt-zh-en", "quickmt-en-es"]
+  }
+}

@@ -7,6 +7,7 @@ import argparse
 import gc
 import json
 import os
+import re
 import sys
 import time
 import unicodedata
@@ -158,16 +159,103 @@ def validate_hypotheses(
             or len(row) != expected_count
         ):
             return {}, "hypothesis-count-mismatch"
-        keys = [str(index) for index in range(len(row))]
-        normalized, error = validate_translations(
-            keys,
-            row,
-            max_characters=max_characters,
-        )
-        if error is not None:
-            return {}, error
-        checked[source] = [normalized[key] for key in keys]
+        valid_values: list[str] = []
+        for raw_value in row:
+            if not isinstance(raw_value, str):
+                continue
+            if any(character in raw_value for character in "\r\n") or any(
+                unicodedata.category(character) == "Cc" for character in raw_value
+            ):
+                continue
+            value = clean_hypothesis(raw_value)
+            if (
+                not value
+                or len(value) > max_characters
+            ):
+                continue
+            valid_values.append(value)
+        if valid_values:
+            checked[source] = valid_values
     return checked, None
+
+
+def clean_hypothesis(value: str) -> str:
+    """Remove common beam-search artifacts without consulting a dictionary."""
+    value = unicodedata.normalize("NFC", value).strip().rstrip(".。").rstrip()
+    value = re.sub(r"^Category:\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+", " ", value).strip()
+
+    # Translation beams often repeat a short word several times. Collapse exact
+    # token runs first, then no-space repeats such as アカウントアカウント.
+    words = value.split(" ")
+    collapsed_words: list[str] = []
+    for word in words:
+        if not collapsed_words or collapsed_words[-1].casefold() != word.casefold():
+            collapsed_words.append(word)
+    value = " ".join(collapsed_words)
+    for unit_length in range(2, len(value) // 2 + 1):
+        if len(value) % unit_length:
+            continue
+        unit = value[:unit_length]
+        if unit.isascii() and unit.isalnum():
+            continue
+        if unit * (len(value) // unit_length) == value:
+            value = unit
+            break
+    return value.strip()
+
+
+def combine_hypotheses(
+    hypotheses: Mapping[str, Sequence[str]],
+    *,
+    max_glosses: int,
+    max_characters: int = MAX_GLOSS_CHARACTERS,
+    language: str | None = None,
+) -> dict[str, str]:
+    """Join up to two distinct model hypotheses without any dictionary lookup."""
+    if max_glosses < 1:
+        raise ValueError("max_glosses must be positive")
+    outputs: dict[str, str] = {}
+    for source, values in hypotheses.items():
+        ranked_values = list(values)
+        if language == "ja":
+            rank = {
+                "match": 0,
+                "indeterminate-han-only": 1,
+                "indeterminate-latin": 2,
+                "mismatch": 3,
+            }
+            ranked_values = [
+                value
+                for _, value in sorted(
+                    enumerate(ranked_values),
+                    key=lambda item: (
+                        rank.get(script_status(clean_hypothesis(item[1]), language), 4),
+                        item[0],
+                    ),
+                )
+            ]
+        selected: list[str] = []
+        seen: set[str] = set()
+        for raw_value in ranked_values:
+            value = clean_hypothesis(raw_value)
+            canonical = "".join(
+                character.casefold()
+                for character in unicodedata.normalize("NFKC", value)
+                if unicodedata.category(character)[0] in {"L", "N"}
+            )
+            if not value or not canonical or canonical in seen:
+                continue
+            joined = "; ".join([*selected, value])
+            if len(joined) > max_characters:
+                continue
+            selected.append(value)
+            seen.add(canonical)
+            if len(selected) >= max_glosses:
+                break
+        if selected:
+            outputs[source] = "; ".join(selected)
+    return outputs
 
 
 class CTranslate2Stage:
@@ -298,17 +386,19 @@ class TranslationPipeline:
         *,
         num_hypotheses: int,
     ) -> tuple[list[list[str]], list[float]]:
-        if num_hypotheses == 1:
-            values, timings = self.translate(texts)
-            return [[value] for value in values], timings
-        if len(self.stages) != 1:
-            raise ValueError("multiple hypotheses require a single-stage route")
+        values = list(texts)
+        timings: list[float] = []
+        for stage in self.stages[:-1]:
+            started = time.perf_counter()
+            values = stage.translate(values)
+            timings.append((time.perf_counter() - started) * 1000)
         started = time.perf_counter()
-        values = self.stages[0].translate_hypotheses(
-            texts,
+        hypotheses = self.stages[-1].translate_hypotheses(
+            values,
             num_hypotheses=num_hypotheses,
         )
-        return values, [(time.perf_counter() - started) * 1000]
+        timings.append((time.perf_counter() - started) * 1000)
+        return hypotheses, timings
 
 
 def run_benchmark(
@@ -321,6 +411,7 @@ def run_benchmark(
     raw_output_path: Path,
     suppress_unsafe_sources: bool,
     num_hypotheses: int,
+    max_glosses: int,
 ) -> list[BatchRecord]:
     texts = [str(row["text"]) for row in entries]
     warmup = [
@@ -364,7 +455,11 @@ def run_benchmark(
                     expected_count=num_hypotheses,
                 )
                 outputs = (
-                    {source: values[0] for source, values in hypothesis_map.items()}
+                    combine_hypotheses(
+                        hypothesis_map,
+                        max_glosses=max_glosses,
+                        language=language,
+                    )
                     if error is None
                     else {}
                 )
@@ -414,6 +509,7 @@ def summarize_single_language(
     threads: int,
     beam_size: int,
     num_hypotheses: int,
+    max_glosses: int,
     suppress_unsafe_sources: bool,
 ) -> dict[str, object]:
     language = str(route["language"])
@@ -479,6 +575,7 @@ def summarize_single_language(
             "batch_size": max(record.size for record in records),
             "beam_size": beam_size,
             "num_hypotheses": num_hypotheses,
+            "max_glosses": max_glosses,
             "threads": threads,
             "seed": DEFAULT_SEED,
             "max_gloss_characters": MAX_GLOSS_CHARACTERS,
@@ -500,6 +597,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--beam-size", type=int, default=4)
     parser.add_argument("--num-hypotheses", type=int, default=1)
+    parser.add_argument("--max-glosses", type=int, default=1)
     parser.add_argument("--suppress-unsafe-sources", action="store_true")
     return parser.parse_args(argv)
 
@@ -508,10 +606,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     if not 1 <= args.batch_size <= 9:
         raise ValueError("--batch-size must be between 1 and 9")
-    if args.threads < 1 or args.beam_size < 1 or args.num_hypotheses < 1:
-        raise ValueError("--threads, --beam-size, and --num-hypotheses must be positive")
+    if (
+        args.threads < 1
+        or args.beam_size < 1
+        or args.num_hypotheses < 1
+        or args.max_glosses < 1
+    ):
+        raise ValueError(
+            "--threads, --beam-size, --num-hypotheses, and --max-glosses "
+            "must be positive"
+        )
     if args.num_hypotheses > args.beam_size:
         raise ValueError("--num-hypotheses cannot exceed --beam-size")
+    if args.max_glosses > args.num_hypotheses:
+        raise ValueError("--max-glosses cannot exceed --num-hypotheses")
     route = load_route_config(args.route)
     entries = load_corpus(args.corpus)
     memory = MemorySampler(os.getpid())
@@ -532,6 +640,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raw_output_path=args.raw_output,
         suppress_unsafe_sources=args.suppress_unsafe_sources,
         num_hypotheses=args.num_hypotheses,
+        max_glosses=args.max_glosses,
     )
     del pipeline
     gc.collect()
@@ -545,6 +654,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         threads=args.threads,
         beam_size=args.beam_size,
         num_hypotheses=args.num_hypotheses,
+        max_glosses=args.max_glosses,
         suppress_unsafe_sources=args.suppress_unsafe_sources,
     )
     try:

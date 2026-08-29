@@ -9,6 +9,8 @@
 #include "Compartment.h"
 #include "ResponseParser.h"
 
+static LONG g_async_refresh_window_count = 0;
+
 static void error_message(const WCHAR* msg) {
   static DWORD next_tick = 0;
   DWORD now = GetTickCount();
@@ -96,6 +98,7 @@ STDAPI WeaselTSF::Activate(ITfThreadMgr* pThreadMgr, TfClientId tfClientId) {
 
 STDAPI WeaselTSF::Deactivate() {
   m_client.EndSession();
+  _UninitAsyncRefreshWindow();
 
   _InitTextEditSink(com_ptr<ITfDocumentMgr>());
 
@@ -159,6 +162,7 @@ STDAPI WeaselTSF::ActivateEx(ITfThreadMgr* pThreadMgr,
   if (!_InitThreadFocusSink())
     goto ExitError;
 
+  _InitAsyncRefreshWindow();
   _EnsureServerConnected();
 
   return S_OK;
@@ -262,4 +266,84 @@ bool WeaselTSF::_EnsureServerConnected() {
   } else {
     return true;
   }
+}
+
+BOOL WeaselTSF::_InitAsyncRefreshWindow() {
+  if (_async_refresh_window)
+    return TRUE;
+
+  bool registered = true;
+  EnterCriticalSection(&g_cs);
+  if (g_async_refresh_window_count == 0) {
+    WNDCLASSW window_class = {};
+    window_class.lpfnWndProc = _AsyncRefreshWindowProc;
+    window_class.hInstance = g_hInst;
+    window_class.lpszClassName =
+        WEASEL_LANGUAGE_INPUT_REFRESH_WINDOW_CLASS;
+    registered = RegisterClassW(&window_class) != 0;
+  }
+  if (registered)
+    ++g_async_refresh_window_count;
+  LeaveCriticalSection(&g_cs);
+  if (!registered)
+    return FALSE;
+
+  _async_refresh_window = CreateWindowExW(
+      0, WEASEL_LANGUAGE_INPUT_REFRESH_WINDOW_CLASS, L"", 0, 0, 0, 0, 0,
+      HWND_MESSAGE, nullptr, g_hInst, this);
+  if (!_async_refresh_window) {
+    EnterCriticalSection(&g_cs);
+    if (--g_async_refresh_window_count == 0) {
+      UnregisterClassW(WEASEL_LANGUAGE_INPUT_REFRESH_WINDOW_CLASS, g_hInst);
+    }
+    LeaveCriticalSection(&g_cs);
+    return FALSE;
+  }
+  m_client.SetAsyncRefreshWindow(_async_refresh_window);
+  return TRUE;
+}
+
+void WeaselTSF::_UninitAsyncRefreshWindow() {
+  m_client.SetAsyncRefreshWindow(nullptr);
+  if (!_async_refresh_window)
+    return;
+  DestroyWindow(_async_refresh_window);
+  _async_refresh_window = nullptr;
+
+  EnterCriticalSection(&g_cs);
+  if (--g_async_refresh_window_count == 0) {
+    UnregisterClassW(WEASEL_LANGUAGE_INPUT_REFRESH_WINDOW_CLASS, g_hInst);
+  }
+  LeaveCriticalSection(&g_cs);
+}
+
+LRESULT CALLBACK WeaselTSF::_AsyncRefreshWindowProc(HWND window,
+                                                    UINT message,
+                                                    WPARAM wParam,
+                                                    LPARAM lParam) {
+  if (message == WM_NCCREATE) {
+    auto* create = reinterpret_cast<CREATESTRUCTW*>(lParam);
+    SetWindowLongPtrW(window, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+  }
+  auto* service = reinterpret_cast<WeaselTSF*>(
+      GetWindowLongPtrW(window, GWLP_USERDATA));
+  if (message == WEASEL_LANGUAGE_INPUT_GLOSS_READY && service) {
+    service->_OnAsyncGlossReady();
+    return 0;
+  }
+  return DefWindowProcW(window, message, wParam, lParam);
+}
+
+void WeaselTSF::_OnAsyncGlossReady() {
+  if (!_pThreadMgr || !_IsComposing())
+    return;
+  com_ptr<ITfContext> context = _GetFocusedContext();
+  if (!context)
+    return;
+  _UpdateClientCapabilities(context);
+  if (!_EnsureServerConnected())
+    return;
+  m_client.ProcessKeyEvent(weasel::KeyEvent{});
+  _UpdateComposition(context);
 }

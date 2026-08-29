@@ -39,14 +39,17 @@ weasel::language_input::RemoteGlossConfig TestConfig(
 }
 
 void WriteCache(const std::filesystem::path& path,
+                const std::string& language,
                 const std::string& word,
                 const std::string& gloss) {
   std::filesystem::create_directories(path.parent_path());
   boost::json::object entries;
-  entries[word] = gloss;
+  boost::json::object language_entries;
+  language_entries[word] = gloss;
+  entries[language] = std::move(language_entries);
   boost::json::object root;
-  root["version"] = 1;
-  root["language"] = "en";
+  root["version"] = 2;
+  root["model"] = "test-model";
   root["entries"] = std::move(entries);
   std::ofstream stream(path, std::ios::binary | std::ios::trunc);
   stream << boost::json::serialize(root);
@@ -104,6 +107,7 @@ int wmain(int argc, wchar_t** argv) {
   Check(insecure.IsUsable(), "plain HTTP requires an explicit opt-in");
 
   std::atomic<int> normal_calls = 0;
+  std::atomic<int> completion_calls = 0;
   std::vector<std::string> received_words;
   auto normal_transport = [&](const auto&,
                               const std::vector<std::string>& words)
@@ -114,34 +118,69 @@ int wmain(int argc, wchar_t** argv) {
   };
   {
     RemoteGlossService service(
-        TestConfig(test_root / L"normal" / L"cache.json"), normal_transport);
+        TestConfig(test_root / L"normal" / L"cache.json"), normal_transport,
+        [&](uintptr_t session_id) {
+          if (session_id == 1)
+            ++completion_calls;
+        });
     service.SetSessionSensitive(1, false);
-    Check(!service.Lookup(1, u8"缺词"),
+    Check(!service.Lookup(1, "en", u8"缺词"),
           "a miss should remain non-blocking before the worker finishes");
-    service.QueueMissing(1, {u8"缺词", u8"缺词"});
+    service.QueueMissing(1, "en", {u8"缺词", u8"缺词"});
     Check(service.WaitUntilIdleForTesting(2s),
           "the fake normal request should finish");
-    auto gloss = service.Lookup(1, u8"缺词");
+    auto gloss = service.Lookup(1, "en", u8"缺词");
     Check(gloss && gloss->language == "en" && gloss->text == "missing term",
           "a normal async result should enter the cache");
     Check(normal_calls == 1 && received_words.size() == 1,
           "duplicate misses should be coalesced into one bounded request");
+    Check(completion_calls == 1,
+          "a current normal result should invoke one completion callback");
     Check(
         std::filesystem::is_regular_file(test_root / L"normal" / L"cache.json"),
         "a normal result should be persisted atomically");
   }
 
+  std::vector<std::string> requested_languages;
+  auto language_transport =
+      [&](const auto& request_config,
+          const std::vector<std::string>&) -> std::optional<RemoteGlossMap> {
+    requested_languages.push_back(request_config.language);
+    return RemoteGlossMap{{u8"文件夹",
+                           request_config.language == "ja" ? u8"フォルダ"
+                                                            : "folder"}};
+  };
+  {
+    RemoteGlossService service(
+        TestConfig(test_root / L"languages" / L"cache.json"),
+        language_transport);
+    service.SetSessionSensitive(4, false);
+    service.QueueMissing(4, "en", {u8"文件夹"});
+    Check(service.WaitUntilIdleForTesting(2s),
+          "the English cache-isolation request should finish");
+    service.QueueMissing(4, "ja", {u8"文件夹"});
+    Check(service.WaitUntilIdleForTesting(2s),
+          "the Japanese cache-isolation request should finish");
+    auto english = service.Lookup(4, "en", u8"文件夹");
+    auto japanese = service.Lookup(4, "ja", u8"文件夹");
+    Check(english && english->text == "folder" && japanese &&
+              japanese->text == u8"フォルダ",
+          "the same candidate must keep independent language cache entries");
+    Check(requested_languages == std::vector<std::string>({"en", "ja"}),
+          "each queued language must reach the transport independently");
+  }
+
   const auto lazy_cache = test_root / L"lazy" / L"cache.json";
-  WriteCache(lazy_cache, u8"旧词", "old value");
+  WriteCache(lazy_cache, "en", u8"旧词", "old value");
   {
     RemoteGlossService service(TestConfig(lazy_cache), normal_transport);
-    Check(!service.Lookup(2, u8"旧词"),
+    Check(!service.Lookup(2, "en", u8"旧词"),
           "unknown sessions must be sensitive by default");
     // If the sensitive lookup had read the file, this replacement would not
     // be observed because the service loads a cache only once.
-    WriteCache(lazy_cache, u8"新词", "new value");
+    WriteCache(lazy_cache, "en", u8"新词", "new value");
     service.SetSessionSensitive(2, false);
-    auto gloss = service.Lookup(2, u8"新词");
+    auto gloss = service.Lookup(2, "en", u8"新词");
     Check(gloss && gloss->text == "new value",
           "sensitive lookups must not read the disk cache");
   }
@@ -160,11 +199,13 @@ int wmain(int argc, wchar_t** argv) {
     return RemoteGlossMap{{u8"敏感词", "sensitive term"}};
   };
   const auto dropped_cache = test_root / L"dropped" / L"cache.json";
+  std::atomic<int> dropped_completions = 0;
   {
-    RemoteGlossService service(TestConfig(dropped_cache), delayed_transport);
+    RemoteGlossService service(TestConfig(dropped_cache), delayed_transport,
+                               [&](uintptr_t) { ++dropped_completions; });
     service.SetSessionSensitive(3, false);
     const auto queue_start = std::chrono::steady_clock::now();
-    service.QueueMissing(3, {u8"敏感词"});
+    service.QueueMissing(3, "en", {u8"敏感词"});
     const auto queue_elapsed = std::chrono::steady_clock::now() - queue_start;
     Check(queue_elapsed < 250ms,
           "queueing a remote miss must not block on the transport");
@@ -182,10 +223,12 @@ int wmain(int argc, wchar_t** argv) {
     Check(service.WaitUntilIdleForTesting(2s),
           "the invalidated request should finish and be discarded");
     service.SetSessionSensitive(3, false);
-    Check(!service.Lookup(3, u8"敏感词"),
+    Check(!service.Lookup(3, "en", u8"敏感词"),
           "a result completed after the sensitive transition must be dropped");
     Check(!std::filesystem::exists(dropped_cache),
           "a dropped sensitive result must not write a cache file");
+    Check(dropped_completions == 0,
+          "a result invalidated by sensitive mode must not refresh the UI");
   }
 
   std::filesystem::remove_all(test_root, filesystem_error);

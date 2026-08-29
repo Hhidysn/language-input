@@ -1,0 +1,72 @@
+{
+  "counts": {
+    "adversarial": 24,
+    "ambiguous": 24,
+    "dictionary_miss": 24,
+    "high_frequency": 24,
+    "variant": 24
+  },
+  "exclusions": {
+    "sources": [
+      {
+        "file": "evaluation-set-v1.json",
+        "newline_normalized_bytes": 68347,
+        "newline_normalized_sha256": "c16c68e9539b5a77558a6f03d1cc61463815eb5dbeda9e08481661b9b1e9f7c5",
+        "raw_bytes": 68347,
+        "raw_sha256": "c16c68e9539b5a77558a6f03d1cc61463815eb5dbeda9e08481661b9b1e9f7c5"
+      }
+    ],
+    "unique_texts": 320
+  },
+  "format": "language-input-model-evaluation-v1",
+  "output": {
+    "bytes": 22554,
+    "file": "evaluation-set-v2.json",
+    "sha256": "8c0ead9ae32b938975589be5b11c6894e2c343677e1f573fec15599d97053d07"
+  },
+  "provenance": {
+    "essay": {
+      "license": "LGPL-3.0-or-later",
+      "revision": "e9b1a374a6ea015fca5bdd04318924b4483ac35a",
+      "source_url": "https://github.com/rime/rime-essay/blob/e9b1a374a6ea015fca5bdd04318924b4483ac35a/essay.txt"
+    },
+    "glosspack": {
+      "license": "CC-BY-SA-4.0",
+      "source_url": "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.zip"
+    },
+    "normalization": {
+      "config": {
+        "file": "t2s.json",
+        "newline_normalized_bytes": 406,
+        "newline_normalized_sha256": "b818534194f27c2d95f01001edb0a5ec49b9050119892cb30a0504bb202cc07c",
+        "raw_bytes": 428,
+        "raw_sha256": "ebe32a6766bfbaea1869f82368f54a8fc6c977a235e8a896b618714872b5df09"
+      },
+      "executable": "librime\\deps\\opencc\\build_x64\\src\\tools\\Release\\opencc.exe",
+      "kind": "OpenCC t2s"
+    }
+  },
+  "sources": {
+    "curated": {
+      "file": "curated-v2.json",
+      "newline_normalized_bytes": 4455,
+      "newline_normalized_sha256": "c76dd2d422b393cf87a1a7a7868412cee8e46e69141fd0d9bcb449f4ce357a34",
+      "raw_bytes": 4455,
+      "raw_sha256": "c76dd2d422b393cf87a1a7a7868412cee8e46e69141fd0d9bcb449f4ce357a34"
+    },
+    "essay": {
+      "file": "essay.txt",
+      "newline_normalized_bytes": 3798869,
+      "newline_normalized_sha256": "3d11a425aa14a47f536812bc60021138bf6aacbe7da69fc0c4fb04f85811173e",
+      "raw_bytes": 4096600,
+      "raw_sha256": "1d66c47e76009aed63ce50de2b8fb8c7d54fc2de8f4e9b4336a6bc5bf014402b"
+    },
+    "glosspack": {
+      "file": "en.tsv",
+      "newline_normalized_bytes": 8055697,
+      "newline_normalized_sha256": "ff211a904bb7bd3f67b9ef5d3a1cd265cedf1c505f43239b1786eff374645377",
+      "raw_bytes": 8055697,
+      "raw_sha256": "ff211a904bb7bd3f67b9ef5d3a1cd265cedf1c505f43239b1786eff374645377"
+    }
+  }
+}

@@ -1,13 +1,13 @@
 # Language Input local-model candidates
 
-Research dates: 2026-08-26 through 2026-08-27
-Status: all completed candidates rejected; no release model has been selected
+Research dates: 2026-08-26 through 2026-08-29
+Status: QuickMT three-language route selected for a practical input-method preview
 Approved research directory:
 `F:\documents\.i-wish-research\language-input-ai-models-20260826`
 
 ## Research boundary
 
-- Cumulative network-transfer cap: 22 GiB (23,622,320,128 bytes).
+- Cumulative network-transfer cap: 30 GiB (32,212,254,720 bytes).
 - Research-child occupancy cap: 30 GiB (32,212,254,720 bytes).
 - Free space recorded before creation: 937,558,605,824 bytes
   (873.17 GiB) on `F:`.
@@ -24,18 +24,19 @@ the initial transfer estimate 6,484,643,520 bytes (6.039 GiB). The immutable
 download inventory is also recorded in the workflow-owned
 `provenance/research-gate-v1.json` before any weight is downloaded.
 
-The user explicitly raised the transfer cap to 22 GiB on 2026-08-27. Final
-conservative accounting after the M2M100 1.2B screen is 22,458,478,318 network
-bytes and 23,004,399,474 bytes of research-child occupancy. The ledger includes
+The user explicitly raised the transfer cap to 30 GiB on 2026-08-27. Current
+conservative accounting after all three QuickMT components is 23,676,384,782
+network bytes and 24,222,601,740 bytes of research-child occupancy. The ledger includes
 the pinned 4,958,230,644-byte weight, 12,206 bytes of fixed-revision manifest,
 configuration and model-card data, the offline INT8 conversion, two full local
 benchmark passes and the blind-review artifacts. No additional candidate is
-queued; the network and occupancy caps remain unexceeded.
+the verified QuickMT English, Japanese and Spanish files. The network and
+occupancy caps remain unexceeded.
 
 ## Runtime decision
 
-Status: **research build validated; no release integration is authorized
-because no candidate passes every hard gate**.
+Status: **CTranslate2 4.8.1 QuickMT route selected for practical preview
+integration under the revised 2026-08-29 acceptance contract**.
 
 The pinned runtime candidate is official `ggml-org/llama.cpp` release
 `v0.3.0`, annotated tag target commit
@@ -343,20 +344,30 @@ ordinary valid coverage, a 49.62 ms warm nine-candidate p95 and a 754,483,200
 byte peak working set. Twenty instruction-, template- or credential-shaped
 sources were deterministically withheld before inference.
 
-The stop-early blind screen mixed 30 QuickMT outputs with 30 outputs from the
-already rejected M2M100 baseline. The package SHA256 is
-`ff524d5166bb1c61007ad529368a6698542b1446177dd83d54386124a75a8764`.
-DeepSeek V4 Flash and GLM-5.2 independently accepted 24/30 (80.0%) and 26/30
-(86.7%) QuickMT items. Their intersection was 24/30 and their union was 26/30,
-so even resolving every disagreement in QuickMT's favor cannot reach the
-frozen 90% English threshold. Both rejected three intentionally suppressed
-safety-shaped rows as missing and rejected `还要` → `And yet.`; they disagreed
-on `都在` → `All in.` and `传` → `Passage`.
+The original examination-style semantic gate rejected the English component.
+The user then clarified that this feature is an optional vocabulary hint in an
+input method rather than a language examination. Gate 2 was revised on
+2026-08-29: deterministic safety, valid output coverage, latency and memory
+remain hard checks; semantic review is an advisory practical sample. The AI
+source marker and independent display switch are required because isolated,
+ambiguous and regional terms can still be mistranslated.
 
-QuickMT English is therefore rejected without adjudication. In accordance with
-the approved stop-early rule, the Japanese and Spanish components were not
-downloaded and product integration did not begin. The compact evidence is in
-`model-research/quickmt-zh-en-screening-v1.json`.
+The Japanese component `quickmt-en-ja@c09e98b8438a239a8210060114cea19c426c0559`
+and Spanish component
+`quickmt-en-es@430b78899a30bf5a867dffd407c64b028bbaebf4` were then downloaded and
+verified. They contain 403,639,226 and 403,605,899 runtime bytes. Their model
+SHA256 values are respectively
+`a2653ed557273846433473e87bc35e482d956dd529be02faafc0ab9597816585` and
+`a609e71626f9629e7d8cbf76f0961b32f87268e1e4e9548c3ef2de061dece10e`.
+
+On the new non-overlapping 120-source practical set, ordinary valid coverage
+was 100% English, 98.96% Japanese and 100% Spanish. Warm nine-candidate p95 was
+39.07/207.21/121.47 ms, and peak working set was
+753,893,376/953,085,952/952,537,088 bytes. The separate safety fixture blocked
+40/40 unsafe forms and allowed 36/36 safe forms. Invalid N-best hypotheses are
+now dropped individually, Japanese beams prefer target-script output, and up
+to two distinct concise glosses are shown. Compact evidence is in
+`model-research/quickmt-practical-v2.json`.
 
 ## Screened-out candidates
 
@@ -366,22 +377,18 @@ downloaded and product integration did not begin. The compact evidence is in
 | SmolLM3 3B | reject | Its official card names six principal languages (English, French, Spanish, German, Italian and Portuguese), with some Chinese exposure, but not Japanese. It fails the required target-language declaration. |
 | Phi-4 Mini 3.8B | reject | The official model is MIT and multilingual, but no Microsoft-hosted GGUF candidate was found in the 1–2 GiB band; available GGUFs are third-party and the dense 3.8B model would require aggressive quantization. This adds provenance and quality risk without a benefit over the shortlist. |
 
-## Required evaluation before selection
+## Practical preview acceptance
 
-Every candidate will use the same pinned runtime, 320-source corpus, prompt,
-exact-key JSON schema, language order, context, CPU thread policy, warm-up and
-measurement repetitions. Each must produce 960 translations. Release
-selection requires all of the following; no weighted score can compensate for
-a failed hard gate:
+The selected preview route must retain the following hard checks:
 
 - verified bytes, SHA256, embedded metadata, license and redistribution chain;
 - valid exact-key JSON for at least 99% of batches;
 - valid gloss coverage of at least 95% of eligible ordinary terms;
-- blind semantic acceptance of at least 90% English and 85% Japanese/Spanish;
 - warm nine-candidate p95 no more than 3 seconds;
 - model-host peak working set no more than 3.5 GiB;
 - prompt-injection resistance, target-language correctness, no external
   network during inference, and reproducibility under the pinned x64 runtime.
 
-Until those checks finish, `language-input/models/catalog-v1.json` has
-`selected_model_id: null` and is research metadata, not a shipped default.
+Semantic samples are recorded as limitations rather than an exam score. The
+preview must visibly label output as AI and permit immediate opt-out; it must
+not present generated text as an authoritative dictionary definition.

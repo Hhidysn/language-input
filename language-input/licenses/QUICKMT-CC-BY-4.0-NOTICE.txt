@@ -1,0 +1,21 @@
+QuickMT model component attribution
+
+This package contains unmodified runtime files from one of the following
+QuickMT repositories at the immutable revision named in manifest.json:
+
+- https://huggingface.co/quickmt/quickmt-zh-en
+- https://huggingface.co/quickmt/quickmt-en-ja
+- https://huggingface.co/quickmt/quickmt-en-es
+
+Creator/publisher: QuickMT
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URI: https://creativecommons.org/licenses/by/4.0/
+Legal code: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Language Input packages the upstream files into a stored-ZIP .limodel
+container and adds manifest.json and this notice. The model and tokenizer
+payloads are not modified. Language Input's source code and surrounding
+runtime are licensed separately. No endorsement by QuickMT is implied.
+
+The material is provided without warranties. See the license URI above for
+the complete terms, including attribution requirements.

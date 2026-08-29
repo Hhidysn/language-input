@@ -33,6 +33,35 @@ typedef enum { COLOR_ABGR = 0, COLOR_ARGB, COLOR_RGBA } ColorFormat;
 using namespace weasel;
 
 static RimeApi* rime_api;
+
+static std::string LanguageInputTargetLanguage(RimeSessionId session_id) {
+  if (rime_api->get_option(session_id, "language_input_ja"))
+    return "ja";
+  if (rime_api->get_option(session_id, "language_input_es"))
+    return "es";
+  return "en";
+}
+
+static bool IsLanguageInputRefreshWindow(HWND window) {
+  wchar_t class_name[64] = {};
+  return window && IsWindow(window) &&
+         GetClassNameW(window, class_name, _countof(class_name)) &&
+         wcscmp(class_name, WEASEL_LANGUAGE_INPUT_REFRESH_WINDOW_CLASS) == 0;
+}
+
+static HWND LanguageInputRefreshWindow(const std::wstring& value) {
+  try {
+    size_t parsed = 0;
+    const uintptr_t raw =
+        static_cast<uintptr_t>(std::stoull(value, &parsed, 10));
+    if (!raw || parsed != value.size())
+      return nullptr;
+    HWND window = reinterpret_cast<HWND>(raw);
+    return IsLanguageInputRefreshWindow(window) ? window : nullptr;
+  } catch (...) {
+    return nullptr;
+  }
+}
 WeaselSessionId _GenerateNewWeaselSessionId(SessionStatusMap sm, DWORD pid) {
   if (sm.empty())
     return (WeaselSessionId)(pid + 1);
@@ -84,13 +113,21 @@ RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
       m_current_dark_mode(false),
       m_global_ascii_mode(false),
       m_show_notifications_time(1200),
+      m_async_refresh_window(nullptr),
       _UpdateUICallback(NULL),
       m_speech(std::make_unique<weasel::language_input::SpeechService>()),
       m_remote_gloss(std::make_unique<
                      weasel::language_input::RemoteGlossService>(
           weasel::language_input::LoadRemoteGlossConfig(
               WeaselUserDataPath() / L"language_input" /
-              L"remote_cache_v1.json"))) {
+              L"ai_cache_v2.json"),
+          weasel::language_input::RemoteGlossTransport{},
+          [this](uintptr_t session_id) {
+            HWND window = m_async_refresh_window;
+            if (window)
+              PostMessageW(window, WEASEL_LANGUAGE_INPUT_GLOSS_READY,
+                           static_cast<WPARAM>(session_id), 0);
+          })) {
   rime_api = rime_get_api();
   assert(rime_api);
   m_pid = GetCurrentProcessId();
@@ -341,8 +378,10 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
               weasel::language_input::ParseGlossForSpeech(comment);
         if (!pending_speech && candidate.text &&
             rime_api->get_option(session_id, "language_input_gloss") &&
-            rime_api->get_option(session_id, "language_input_remote")) {
-          auto remote = m_remote_gloss->Lookup(session_id, candidate.text);
+            rime_api->get_option(session_id, "language_input_ai")) {
+          auto remote = m_remote_gloss->Lookup(
+              session_id, LanguageInputTargetLanguage(session_id),
+              candidate.text);
           if (remote)
             pending_speech = weasel::language_input::ParseGlossForSpeech(
                 remote->MarkedComment());
@@ -510,6 +549,7 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
                                             LPWSTR buffer) {
   std::string app_name;
   std::string client_type;
+  std::wstring async_refresh_window;
   // parse request text
   wbufferstream bs(buffer, WEASEL_IPC_BUFFER_LENGTH);
   std::wstring line;
@@ -530,8 +570,16 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
     if (starts_with(line, kClientTypeKey)) {
       client_type = wtou8(line.substr(kClientTypeKey.length()));
     }
+    const std::wstring kAsyncRefreshWindowKey =
+        L"session.async_refresh_window=";
+    if (starts_with(line, kAsyncRefreshWindowKey)) {
+      async_refresh_window = line.substr(kAsyncRefreshWindowKey.length());
+    }
   }
   SessionStatus& session_status = get_session_status(ipc_id);
+  if (client_type == "tsf")
+    session_status.async_refresh_window =
+        LanguageInputRefreshWindow(async_refresh_window);
   RimeSessionId session_id = session_status.session_id;
   // set app specific options
   if (!app_name.empty()) {
@@ -565,8 +613,10 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
   const bool remote_enabled =
       m_remote_gloss->available() &&
       rime_api->get_option(session_id, "language_input_gloss") &&
-      rime_api->get_option(session_id, "language_input_remote") &&
+      rime_api->get_option(session_id, "language_input_ai") &&
       !rime_api->get_option(session_id, "language_input_sensitive");
+  const std::string target_language =
+      LanguageInputTargetLanguage(session_id);
   std::vector<std::string> remote_misses;
   for (int i = 0; i < ctx.menu.num_candidates; ++i) {
     const RimeCandidate& candidate = ctx.menu.candidates[i];
@@ -574,7 +624,8 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
     std::string comment = candidate.comment ? candidate.comment : "";
     if (remote_enabled && candidate.text &&
         !weasel::language_input::ParseGlossForSpeech(comment)) {
-      auto remote = m_remote_gloss->Lookup(session_id, candidate.text);
+      auto remote =
+          m_remote_gloss->Lookup(session_id, target_language, candidate.text);
       if (remote) {
         if (!comment.empty())
           comment += "  ";
@@ -598,7 +649,7 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
   cinfo.currentPage = ctx.menu.page_no;
   cinfo.is_last_page = ctx.menu.is_last_page;
   if (remote_enabled && !remote_misses.empty())
-    m_remote_gloss->QueueMissing(session_id, remote_misses);
+    m_remote_gloss->QueueMissing(session_id, target_language, remote_misses);
 }
 
 void RimeWithWeaselHandler::StartMaintenance() {
@@ -633,6 +684,30 @@ void RimeWithWeaselHandler::SetOption(WeaselSessionId ipc_id,
 
 void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
   _UpdateUICallback = cb;
+}
+
+void RimeWithWeaselHandler::SetAsyncRefreshWindow(HWND window) {
+  m_async_refresh_window = window;
+}
+
+void RimeWithWeaselHandler::RefreshAsync(uintptr_t session_id) {
+  for (const auto& pair : m_session_status_map) {
+    if (pair.second.session_id != session_id)
+      continue;
+    const RimeSessionId current = pair.second.session_id;
+    if (!rime_api->get_option(current, "language_input_gloss") ||
+        !rime_api->get_option(current, "language_input_ai") ||
+        rime_api->get_option(current, "language_input_sensitive"))
+      return;
+    if (_IsSessionTSF(current)) {
+      HWND window = pair.second.async_refresh_window;
+      if (IsLanguageInputRefreshWindow(window))
+        PostMessageW(window, WEASEL_LANGUAGE_INPUT_GLOSS_READY, 0, 0);
+      return;
+    }
+    _UpdateUI(pair.first);
+    return;
+  }
 }
 
 bool RimeWithWeaselHandler::_IsDeployerRunning() {

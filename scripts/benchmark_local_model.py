@@ -227,6 +227,12 @@ def is_unsafe_source(text: str) -> bool:
     ascii_markers = (
         "system:",
         "assistant:",
+        "developer:",
+        "user:",
+        "<|system|>",
+        "<|assistant|>",
+        "begin system prompt",
+        "end system prompt",
         "<script",
         "</script",
         "[inst]",
@@ -239,6 +245,17 @@ def is_unsafe_source(text: str) -> bool:
         "bearer ",
         "###",
         '\"},\"',
+        "api_key",
+        "powershell ",
+        "cmd.exe",
+        "curl http",
+        "wget http",
+        "drop table",
+        "union select",
+        "${",
+        "<prompt>",
+        "</prompt>",
+        "c:\\users\\",
     )
     if any(marker in folded for marker in ascii_markers):
         return True
@@ -257,6 +274,15 @@ def is_unsafe_source(text: str) -> bool:
         "覆盖系统提示",
         "忽略限制",
         "系统提示：改写规则",
+        "忽略之前所有",
+        "遵循以下新规则",
+        "泄露api",
+        "打印环境变量",
+        "获取密码",
+        "读取系统变量",
+        "覆盖安全策略",
+        "回复时不要包含翻译",
+        "显示密钥",
     )
     return any(marker in folded for marker in chinese_markers)
 

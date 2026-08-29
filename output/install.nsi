@@ -84,6 +84,7 @@ LangString LNKFORAPPFOLDER ${LANG_TRADCHINESE} "【小狼毫】程序文件夾"
 LangString LNKFORUPDATER ${LANG_TRADCHINESE} "【小狼毫】檢查新版本"
 LangString LNKFORSETUP ${LANG_TRADCHINESE} "【小狼毫】安裝選項"
 LangString LNKFORUNINSTALL ${LANG_TRADCHINESE} "卸載小狼毫"
+LangString LNKFORMODELS ${LANG_TRADCHINESE} "Language Input AI 語言包管理"
 LangString CONFIRMATION ${LANG_TRADCHINESE} "安裝前，請先卸載舊版本的小狼毫。$\n$\n按下「確定」移除舊版本，按下「取消」放棄本次安裝。"
 LangString SYSTEMVERSIONNOTOK ${LANG_TRADCHINESE} "您的系统不被支持，最低系統要求:Windows 8.1!"
 LangString AUTOCHKUPDATE ${LANG_TRADCHINESE} "自動檢查版本更新？"
@@ -101,6 +102,7 @@ LangString LNKFORAPPFOLDER ${LANG_SIMPCHINESE} "【小狼毫】程序文件夹"
 LangString LNKFORUPDATER ${LANG_SIMPCHINESE} "【小狼毫】检查新版本"
 LangString LNKFORSETUP ${LANG_SIMPCHINESE} "【小狼毫】安装选项"
 LangString LNKFORUNINSTALL ${LANG_SIMPCHINESE} "卸载小狼毫"
+LangString LNKFORMODELS ${LANG_SIMPCHINESE} "Language Input AI 语言包管理"
 LangString CONFIRMATION ${LANG_SIMPCHINESE} '安装前，请先卸载旧版本的小狼毫。$\n$\n点击 "确定" 移除旧版本，或点击 "取消" 放弃本次安装。'
 LangString SYSTEMVERSIONNOTOK ${LANG_SIMPCHINESE} "您的系統不被支持，最低系统要求:Windows 8.1!"
 LangString AUTOCHKUPDATE ${LANG_SIMPCHINESE} "自动检查版本更新？"
@@ -118,6 +120,7 @@ LangString LNKFORAPPFOLDER ${LANG_ENGLISH} "Weasel App Folder"
 LangString LNKFORUPDATER ${LANG_ENGLISH} "Weasel Check for Updates"
 LangString LNKFORSETUP ${LANG_ENGLISH} "Weasel Installation Preference"
 LangString LNKFORUNINSTALL ${LANG_ENGLISH} "Uninstall Weasel"
+LangString LNKFORMODELS ${LANG_ENGLISH} "Language Input AI Language Packs"
 LangString CONFIRMATION ${LANG_ENGLISH} "Before installation, please uninstall the old version of Weasel.$\n$\nPress 'OK' to remove the old version, or 'Cancel' to abort installation."
 LangString SYSTEMVERSIONNOTOK ${LANG_ENGLISH} "Your system not supported, minimium system required: Windows 8.1!"
 LangString AUTOCHKUPDATE ${LANG_ENGLISH} "Automatically check for updates?"
@@ -137,7 +140,7 @@ toquit:
   StrCmp $R0 "" 0 skip
   ; The default installation directory
   ; install x64 build for NativeARM64_WINDOWS11 and NativeAMD64_WINDOWS11
-  ${If} ${AtLeastWin11} ; Windows 11 and above
+  ${If} ${AtLeastBuild} 22000 ; Windows 11 and above
     ${If} ${IsNativeARM64}
       StrCpy $INSTDIR "$PROGRAMFILES64\Rime"
     ${ElseIf} ${IsNativeAMD64}
@@ -278,7 +281,7 @@ program_files:
     File /nonfatal "weaselARM64X.ime"
   ${EndIf}
   ; install x64 build for NativeARM64_WINDOWS11 and NativeAMD64_WINDOWS11
-  ${If} ${AtLeastWin11} ; Windows 11 and above
+  ${If} ${AtLeastBuild} 22000 ; Windows 11 and above
     ${If} ${IsNativeARM64}
       File "WeaselDeployer.exe"
       File "WeaselServer.exe"
@@ -311,6 +314,9 @@ program_files:
   ${Endif}
 
   File "WeaselSetup.exe"
+  File "model-host\LanguageInputModelHost.exe"
+  SetOutPath $INSTDIR\_internal
+  File /r "model-host\_internal\*.*"
   ; shared data files
   SetOutPath $INSTDIR\data
   File "data\*.yaml"
@@ -323,12 +329,14 @@ program_files:
   ; images
   SetOutPath $INSTDIR\data\preview
   File "data\preview\*.png"
-  ; Language Input local gloss filter, deterministic GlossPack and notices
+  ; Language Input gloss filter, deterministic GlossPack, local-AI index and notices
   SetOutPath $INSTDIR\data\lua\language_input
   File "data\lua\language_input\gloss_filter.lua"
   SetOutPath $INSTDIR\data\language_input\gloss
   File "data\language_input\gloss\en.tsv"
   File "data\language_input\gloss\en.manifest.json"
+  SetOutPath $INSTDIR\data\language_input\models
+  File "data\language_input\models\packs-v2.json"
   SetOutPath $INSTDIR\data\licenses\language-input
   File "data\licenses\language-input\*.txt"
 
@@ -409,6 +417,7 @@ Section "Start Menu Shortcuts"
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORAPPFOLDER).lnk" "$INSTDIR\WeaselServer.exe" "/weaseldir" "$SYSDIR\shell32.dll" 19
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUPDATER).lnk" "$INSTDIR\WeaselServer.exe" "/update" "$SYSDIR\shell32.dll" 13
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
+  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORMODELS).lnk" "$INSTDIR\LanguageInputModelHost.exe" '--manage --catalog "$INSTDIR\data\language_input\models\packs-v2.json"' "$SYSDIR\shell32.dll" 167
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
 
 SectionEnd
@@ -439,11 +448,14 @@ Section "Uninstall"
   Delete  "$INSTDIR\data\opencc\*.*"
   Delete  "$INSTDIR\data\preview\*.*"
   Delete  "$INSTDIR\data\language_input\gloss\*.*"
+  Delete  "$INSTDIR\data\language_input\models\*.*"
   Delete  "$INSTDIR\data\lua\language_input\*.*"
   Delete  "$INSTDIR\data\licenses\language-input\*.*"
   Delete  "$INSTDIR\data\*.*"
   Delete  "$INSTDIR\*.*"
+  RMDir /r "$INSTDIR\_internal"
   RMDir  "$INSTDIR\data\language_input\gloss"
+  RMDir  "$INSTDIR\data\language_input\models"
   RMDir  "$INSTDIR\data\language_input"
   RMDir  "$INSTDIR\data\lua\language_input"
   RMDir  "$INSTDIR\data\lua"

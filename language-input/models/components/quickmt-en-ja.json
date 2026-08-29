@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "component_id": "quickmt-en-ja",
+  "repository": "quickmt/quickmt-en-ja",
+  "revision": "c09e98b8438a239a8210060114cea19c426c0559",
+  "license": "CC-BY-4.0",
+  "provides": ["ja"],
+  "requires": ["quickmt-zh-en"],
+  "runtime_bytes": 403639226,
+  "files": [
+    {"path": "README.md", "size": 4498, "sha256": "62f2f6c53c4c27332f4cdbab14db4e64ff0b5afe18bb271b261ef7ca24ad74df"},
+    {"path": "config.json", "size": 223, "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69"},
+    {"path": "model.bin", "size": 401699775, "sha256": "a2653ed557273846433473e87bc35e482d956dd529be02faafc0ab9597816585"},
+    {"path": "source_vocabulary.json", "size": 332239, "sha256": "b896ae8632a0ebb369c5982658c3bd94eefa01e4574ccd659d87272498bbe743"},
+    {"path": "src.spm.model", "size": 583983, "sha256": "01dc857df9df5987bec61812d1fbc2e78ad530346c09fe3ffaf27184358ab8fd"},
+    {"path": "target_vocabulary.json", "size": 435375, "sha256": "b130ef6213111d052be24288d6a0ac1eecf2b0bbe54cc4f7d63b56d2bd57c334"},
+    {"path": "tgt.spm.model", "size": 583133, "sha256": "cbd449d7e92d850f6d36efeafb40cea3a8468f55db0ca751ee4ece0ceb70d19b"}
+  ]
+}

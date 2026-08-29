@@ -25,14 +25,14 @@ update requires it.
    `F:\documents\.i-wish-research\language-input-ai-models-20260826` and verify
    its parent containment before creation.
 3. Record free space and enforce the approved cumulative limits:
-   - network transfer: 20 GiB;
+   - network transfer: 30 GiB;
    - total owned child: 30 GiB.
 4. Route model downloads, candidate source clones, build caches, command temp
    and benchmark output into that child.
-5. Research current official `llama.cpp` versions and current 1.0–2.0 GiB GGUF
-   models with Chinese-to-English/Japanese/Spanish capability.
+5. Research current CTranslate2 translation components no larger than 1–2 GB
+   each with Chinese-to-English/Japanese/Spanish capability.
 6. For every candidate, record immutable source URL, commit/release, model
-   revision, GGUF quantization, bytes, SHA256, license text, attribution,
+   revision, INT8 format, bytes, SHA256, license text, attribution,
    redistribution status and why it enters or leaves the shortlist.
 7. Write durable findings to
    `language-input/model-research/CANDIDATES.md` and a machine-readable
@@ -55,23 +55,20 @@ Files:
 
 Steps:
 
-1. Extract the fixed, deterministic 320-source corpus specified by the design:
-   120 weighted high-frequency terms, 80 GlossPack misses, 40 variant cases,
-   40 ambiguous terms and 40 adversarial/mixed strings.
+1. Extract the fixed, deterministic 120-source practical corpus plus a separate
+   76-item safety fixture specified by the revised design.
 2. Pin source hashes and provenance for every corpus segment.
 3. Define the exact system prompt, JSON schema, sampling settings, context,
    thread count, warm-up and measurement repetitions.
 4. Test the harness with a fake OpenAI-compatible local server before using a
    real model.
-5. Download candidates within the approved cap and run all 960 outputs per
-   model with the same pinned runtime.
+5. Download components within the approved cap and run all three language
+   routes with the same pinned runtime.
 6. Record JSON/key validity, valid-gloss coverage, cold latency, warm p50/p95,
    peak working set, output length, target-language detection and failures.
-7. Anonymize a stratified 360-output subset for two independent multilingual
-   reviewers. Adjudicate disagreements against cited bilingual references.
-8. Select a model only if it satisfies every license, memory, structure,
-   coverage and semantic gate. Otherwise return the failed gates for user
-   review without weakening them.
+7. Keep semantic sampling advisory and disclose representative failure modes.
+8. Select a route only if it satisfies license, safety, memory, structure and
+   practical coverage gates. Do not disguise generated text as a dictionary.
 9. Commit compact reports and selected-model provenance; retain only useful
    workflow-owned research bytes under the bounded research child.
 
@@ -165,7 +162,7 @@ responses never repaint.
 
 Files and dependencies:
 
-- pin the selected official `llama.cpp` source by immutable commit using a
+- pin CTranslate2 4.8.1 and SentencePiece 0.2.1 by immutable releases using a
   reproducible dependency mechanism;
 - add build/staging scripts that keep dependency caches out of the project;
 - add the x64 `LanguageInputModelHost` project or reproducible wrapper target;
@@ -174,7 +171,8 @@ Files and dependencies:
 
 Steps:
 
-1. Build the pinned runtime from source and verify its license/provenance.
+1. Build or bundle the pinned x64 runtime reproducibly and verify every native
+   dependency's license/provenance.
 2. Bind only to `127.0.0.1` on an OS-selected port and require a fresh random
    bearer token.
 3. Launch hidden, place the process in a kill-on-close Job Object and prevent a
@@ -203,7 +201,7 @@ Steps:
 
 1. Parse only the installed, versioned catalog with strict schema and duplicate
    rejection.
-2. List installed/active models and show license, bytes, memory, languages,
+2. List installed components and active routes; show license, bytes, memory, languages,
    validation and benchmark summary.
 3. Use BITS for explicit HTTPS downloads and resume; check free space first.
 4. Stage outside the active directory, verify exact bytes/SHA256, then move
@@ -217,8 +215,8 @@ Steps:
    insufficient-memory states.
 
 Gate: fake download and archive fixtures prove resume abstraction, hash failure,
-path containment, duplicate rejection, activation, switching and removal before
-using the real multi-gigabyte pack.
+path containment, dependency handling, activation, switching and removal before
+using the real component packs.
 
 ## Task 8: package, document and verify the release artifacts
 
@@ -236,12 +234,13 @@ Steps:
 2. Build native tests for both architectures and the x64 model host.
 3. Run GlossPack, option, speech, AI/cache, sensitive-userdb, async refresh,
    model-manager, performance and real-model benchmarks.
-4. Stage runtime/catalog/notices while proving no GGUF or user database enters
-   the core installer.
+4. Stage runtime/catalog/notices while proving no model weight or user database
+   enters the core installer.
 5. Sign every first-party PE, then sign the NSIS installer and embedded
    uninstaller with the existing local certificate without exporting its key.
-6. Create the selected `.limodel` pack only when redistribution is permitted;
-   verify archive paths, manifest, model hash and notices.
+6. Create the selected English, Japanese and Spanish `.limodel` component packs
+   only when redistribution is permitted; verify archive paths, dependencies,
+   manifests, model hashes and notices.
 7. Extract the final installer to a unique audit directory and verify all files,
    signatures, source markers, privacy notices and zero diagnostic artifacts.
 8. Perform controlled runtime tests in the scope host and Notepad for immediate

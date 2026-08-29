@@ -1,0 +1,21 @@
+Language Input local model runtime notices
+==========================================
+
+The optional x64 local model host is built with these pinned components:
+
+- CPython 3.11, Python Software Foundation License 2.0
+  https://www.python.org/downloads/release/python-31115/
+- CTranslate2 4.8.1, MIT License
+  https://github.com/OpenNMT/CTranslate2/tree/v4.8.1
+- SentencePiece 0.2.1, Apache License 2.0
+  https://github.com/google/sentencepiece/tree/v0.2.1
+- NumPy 2.4.6, BSD-3-Clause License
+  https://github.com/numpy/numpy/tree/v2.4.6
+- PyYAML 6.0.3, MIT License
+  https://github.com/yaml/pyyaml/tree/6.0.3
+- PyInstaller 6.15.0, GPL-2.0-or-later with the bootloader exception
+  https://github.com/pyinstaller/pyinstaller/tree/v6.15.0
+
+QuickMT model components are separate, explicitly imported .limodel packages
+distributed under CC BY 4.0. Their archive NOTICE.txt is preserved with each
+installed component. The core Weasel installer contains no model weights.

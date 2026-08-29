@@ -1,4 +1,4 @@
-# Language Input v0.1 verification record
+# Language Input verification record
 
 Baseline: Weasel `9cc96e2` (0.17.4), librime `1c23358` (1.13.1). The librime privacy delta is reproducible from `patches/librime-sensitive-mode.patch`. The Lua plugin and third-party Lua source are pinned by `scripts/prepare_librime_lua.ps1`.
 
@@ -17,9 +17,32 @@ Baseline: Weasel `9cc96e2` (0.17.4), librime `1c23358` (1.13.1). The librime pri
 | Sensitive mode has no remote/cache access | Unknown-session, lazy-cache and late-result tests | Formal password-control runtime check | Passed |
 | Local typing performance | 250 warm iterations: x64 p95 0.476 ms, 47.45 MiB delta; Win32 p95 0.424 ms, 34.16 MiB delta | Formal candidate UI remained responsive | Passed |
 | Installer contains custom data and notices | Package-content audit | Installed GlossPack hash, privacy notice and zero-userdb audit | Passed |
-| Every first-party executable is signed | Nine packaged first-party PE signatures | Installer, embedded uninstaller and installed-file Authenticode audit | Passed |
+| Every first-party executable is signed | Ten packaged first-party PE signatures | Installer, embedded uninstaller and installed-file Authenticode audit | Passed |
 
 Do not change a `Pending` row to `Passed` without recording fresh evidence from the final staged and signed artifacts.
+
+## v0.2 local-AI release matrix (2026-08-29)
+
+| Requirement | Automated evidence | Runtime evidence | Status |
+| --- | --- | --- | --- |
+| English, Japanese and Spanish `.limodel` packs | Whole-pack and per-file SHA256 audit; dependency and atomic-replace tests | Three real packs imported and all three routes produced glosses | Passed |
+| AI output stays distinct from the fixed dictionary | v2 cache tests isolate model and language; Rime option matrix covers dictionary/AI selection | Final installed candidate markers and source switching | Pending |
+| AI never falls back to the fixed dictionary | Source-path review and missing-model behavior tests | Missing-pack behavior in final installed build | Pending |
+| Local Host is loopback-only and authenticated | Host test verifies unauthorized 401, authorized health and idle exit | Final installed loopback process returned 401 without a token, advertised all three languages with the token, and left no listener after exit | Passed |
+| Password/PIN has zero AI request, cache, display and speech | Native sensitive cancellation, late-result and no-callback tests | Final installed password/PIN controls | Pending |
+| AI completion refreshes the candidate UI | Native completion callback and main-thread state recheck tests | Final Notepad TSF automatic refresh without another key | Pending |
+| Host and installer are reproducible and signed | Pinned Host build script, bundle manifest and Authenticode audit | Installed first-party PE audit and signed 0.17.4.3 installer extraction | Passed |
+
+The three selected packs are individually below 1–2 GB: 409,710,191 bytes (zh→en), 403,642,726 bytes (en→ja), and 403,609,399 bytes (en→es). Japanese and Spanish use an English pivot. Known short-word ambiguity is accepted for vocabulary hints and must remain visible through the `〔<lang>·AI〕` marker.
+
+## Final 0.17.4.3 installation evidence (2026-08-29, Asia/Shanghai)
+
+- `output/archives/weasel-0.17.4.3-installer.exe` is 41,119,520 bytes, has SHA256 `7B97F33BEA9D5FB6CA3EFEF410ABFC07E034F0A180F54685A7AE57E9F9B399FB`, and has a valid Authenticode signature from `CN=Language Input Local Build`. Its embedded product version is `0.17.4.3`.
+- The installed uninstaller registry entry reports DisplayVersion `0.17.4.3`, with install directory `C:\Program Files\Rime\weasel-0.17.4`; `WeaselDeployer.exe /deploy` returned exit code 0 and `WeaselServer.exe` is running from that directory.
+- A fresh 7-Zip extraction of the installer contained 250 files, the three model-pack catalog entries, both Language Input notices, and zero `*.userdb*` files. The ten first-party PE files at the package root (Host, Weasel binaries, Rime DLL, IME files and uninstaller) all have valid Authenticode signatures; bundled third-party runtime files are tracked separately and are not first-party signing claims.
+- The installed Host smoke test used a loopback port: an unauthenticated `/health` request returned 401; the authenticated response advertised `en,es,ja`; requests for `你好`, `内` and `你` returned JSON glosses for all three languages. The Host process was then stopped and left no listener.
+- Fresh regression evidence: `test_language_input_model_host.py` 6/6, `test_limodel_pack.py` 3/3, `test_model_evaluation_tools.py` 32/32; `test_rime_gloss.ps1` 48 switch-matrix cases for each of x64 and Win32; sensitive dictionary probes passed with 0 entries; 250-iteration performance checks passed (x64 p95 0.536 ms, 47.19 MiB delta; Win32 p95 0.599 ms, 34.86 MiB delta); native remote and speech tests passed for both architectures.
+- The unsaved `n.txt` Notepad test tab was closed with “不保存”; the remaining user tabs were left open. The separate Notepad++ configuration tabs were not modified.
 
 ## Final signed release evidence (2026-08-26, Asia/Shanghai)
 

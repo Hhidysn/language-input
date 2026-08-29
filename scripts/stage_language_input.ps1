@@ -11,6 +11,7 @@ $rimeSource = Join-Path $sourceRoot 'rime'
 $licenseSource = Join-Path $sourceRoot 'licenses'
 $readmeSource = Join-Path $sourceRoot 'README.zh-CN.md'
 $privacySource = Join-Path $sourceRoot 'PRIVACY.zh-CN.md'
+$modelCatalogSource = Join-Path $sourceRoot 'models\packs-v2.json'
 $outputData = Join-Path $root 'output\data'
 $outputRoot = Join-Path $root 'output'
 
@@ -19,6 +20,7 @@ foreach ($required in @(
   $licenseSource,
   $readmeSource,
   $privacySource,
+  $modelCatalogSource,
   $outputData
 )) {
   if (-not (Test-Path -LiteralPath $required)) {
@@ -51,6 +53,9 @@ function Copy-TreeFiles {
 
 Copy-TreeFiles $rimeSource $outputData
 Copy-TreeFiles $licenseSource (Join-Path $outputData 'licenses\language-input')
+New-Item -ItemType Directory -Path (Join-Path $outputData 'language_input\models') -Force | Out-Null
+Copy-Item -LiteralPath $modelCatalogSource `
+  -Destination (Join-Path $outputData 'language_input\models\packs-v2.json') -Force
 Copy-Item -LiteralPath $readmeSource `
   -Destination (Join-Path $outputRoot 'LANGUAGE-INPUT-README.txt') -Force
 Copy-Item -LiteralPath $privacySource `

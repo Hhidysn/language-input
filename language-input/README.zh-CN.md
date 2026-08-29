@@ -1,72 +1,74 @@
-# Language Input（Windows v0.1）
+# Language Input（Windows v0.2）
 
-Language Input 是一个基于小狼毫 Weasel 0.17.4 和 librime 1.13.1 源码构建的 Windows 输入法实验版。它在中文候选后显示简短外语释义，并在用数字键 `1`–`9` 选词成功后异步朗读该释义。
+Language Input 是一个基于小狼毫 Weasel 0.17.4 和 librime 1.13.1 源码构建的 Windows 输入法实验版。它在中文候选后显示简短的英语、日语或西班牙语词汇提示，并在用数字键 `1`–`9` 选词成功后异步朗读对应释义。
 
 ## 已实现
 
-- 默认方案：`译注小鹤双拼`；同时保留 `译注全拼`。
-- 每页 9 个候选，本地英文释义默认开启。
-- `1`–`9` 选中对应候选后朗读释义；朗读不阻塞按键线程。
-- 本地释义来自 CC-CEDICT 生成的确定性 GlossPack，离线可用。
-- 可选的 OpenAI Chat Completions 兼容远端缺词查询，默认关闭。
-- 密码、PIN 和私密输入范围中关闭释义、朗读、远端访问、远端缓存读写，以及用户词典读取和学习。
-- 同时包含 x64 与 Win32 组件，安装程序会按系统选择。
+- 默认方案为 `译注小鹤双拼`，同时保留 `译注全拼`。
+- 每页 9 个候选；候选译注显示、翻译来源、目标语言和朗读分别控制。
+- 词典模式使用内置 CC-CEDICT 英文 GlossPack，完全离线。
+- AI 模式使用本机 QuickMT 小模型，支持英语、日语和西班牙语；不会回退到固定词典。
+- 三个模型组件都是约 404–410 MB 的按需 `.limodel` 包，不随核心安装包捆绑。
+- AI Host 只监听随机的 `127.0.0.1` 端口，使用每次启动随机生成的 Bearer 令牌，并在 10 分钟没有合格请求后退出。
+- 密码、PIN 和尚未识别输入范围的控件中，禁止译注、模型请求、缓存读写、朗读和用户词典学习。
+- 同时包含 x64 与 Win32 输入法组件；AI Host 为 x64，32 位应用仍可通过小狼毫服务使用它。
 
-v0.1 不包含 Android 输入法，也不捆绑本地 LLM。当前内置本地词典只有英文；数据格式和远端目标语言已经为后续多语言包预留扩展点。
+v0.2 仍不包含 Android 输入法。AI 输出只是帮助扩展词汇的简短提示，不是权威词典或考试级翻译；孤立的短词和多义词可能选错词义。
 
 ## 使用
 
-安装后，在 Windows 输入法列表中选择小狼毫。使用小狼毫的方案选单（通常为 `F4`）选择：
+安装后，在 Windows 输入法列表中选择小狼毫。使用小狼毫方案选单（通常为 `F4`）选择：
 
 - `译注小鹤双拼`：输入 `nihc` 可得到“你好”。
 - `译注全拼`：输入 `nihao` 可得到“你好”。
 
-方案中的三个开关为：
+方案中有四组控制项：
 
-- `译注开/关`：控制候选后的本地或远端释义。
-- `朗读开/关`：控制数字键选词成功后的释义朗读。
-- `远译开/关`：允许显示已经配置并查询到的远端缺词释义；默认关闭。
+- `译注显示：关/开`：总开关。关闭后不查询词典、不启动模型、不读写 AI 缓存，也不显示或朗读译注。
+- `翻译来源：词典/AI`：英语固定词典与本地 AI 二选一。AI 模式没有词典回退。
+- `目标语言：英语/日语/西班牙语`：日语或西班牙语会自动选择 AI；切回英语时仍保持 AI，除非手动切回词典。
+- `朗读：关/开`：用数字键 `1`–`9` 选中对应候选后，朗读当前译注文字。
+
+AI 译注带有明确来源标记，例如 `〔en·AI〕 hello; hi`、`〔ja·AI〕 こんにちは`、`〔es·AI〕 hola`。词典译注沿用 `[en]` 标记。
 
 朗读使用 Windows SAPI。请在 Windows“语言和语音”设置中安装目标语言语音；没有匹配语音时，系统可能使用默认语音。
 
-## 可选远端缺词查询
+## 导入本地 AI 语言包
 
-远端功能需要同时满足两层开关：进程环境变量启用，并在方案中打开 `远译`。服务启动时读取以下变量：
+安装程序只包含约 118 MB 的本地推理 Host，不包含模型。安装后从开始菜单打开 `Language Input AI 语言包管理`，逐个选择 `.limodel` 文件导入。导入时会校验整包和包内每个文件的 SHA256；不匹配或依赖缺失的包会被拒绝。
 
-| 变量 | 含义 | 默认值 |
-| --- | --- | --- |
-| `LANGUAGE_INPUT_REMOTE_ENABLED` | 设为 `1` 才创建远端服务 | 关闭 |
-| `LANGUAGE_INPUT_REMOTE_URL` | OpenAI Chat Completions 兼容端点 | `https://api.openai.com/v1/chat/completions` |
-| `LANGUAGE_INPUT_REMOTE_MODEL` | 兼容端点的模型名 | `gpt-4.1-mini` |
-| `LANGUAGE_INPUT_REMOTE_API_KEY` | Bearer API key；只从环境变量读取 | 无 |
-| `LANGUAGE_INPUT_REMOTE_LANGUAGE` | 目标语言 BCP-47 标签 | `en` |
-| `LANGUAGE_INPUT_REMOTE_ALLOW_HTTP` | 设为 `1` 才允许明文 HTTP，仅限本机测试 | 关闭 |
+| 用途 | 文件 | 大小 | SHA256 |
+| --- | --- | ---: | --- |
+| 英语基础包 | `quickmt-zh-en-c27cc802.limodel` | 409,710,191 B | `fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7` |
+| 日语增量包 | `quickmt-en-ja-c09e98b8.limodel` | 403,642,726 B | `e08181424a18a1f85b35f7e51a1e84dc78ece081bf2df31c9958d4a4036bba67` |
+| 西班牙语增量包 | `quickmt-en-es-430b7889.limodel` | 403,609,399 B | `561c1434de457aad9e750ec79b99a1ef6991fcf6a8ab96aa6181afad18a9a0b2` |
 
-示例（变量只传给这次启动的服务进程）：
-
-```powershell
-$root = (Get-ItemProperty 'HKLM:\SOFTWARE\Rime\Weasel').WeaselRoot
-& "$root\WeaselServer.exe" /quit
-$env:LANGUAGE_INPUT_REMOTE_ENABLED = '1'
-$env:LANGUAGE_INPUT_REMOTE_URL = 'https://example.com/v1/chat/completions'
-$env:LANGUAGE_INPUT_REMOTE_MODEL = 'your-model'
-$env:LANGUAGE_INPUT_REMOTE_API_KEY = 'your-key'
-$env:LANGUAGE_INPUT_REMOTE_LANGUAGE = 'en'
-Start-Process -FilePath "$root\WeaselServer.exe"
-```
-
-不要把真实 key 写入源码、配置文件或截图。将 key 持久写入 Windows 用户环境变量会以可被当前用户读取的形式保存在注册表中；v0.1 尚未集成 Windows 凭据管理器。
-
-每次请求最多发送当前页 9 个“本地释义缺失”的候选文字、目标语言和模型名。请求在后台执行，不阻塞输入；结果通常在下一次候选刷新时出现。成功结果缓存于：
+英语基础包必须先导入。日语和西班牙语是“中文→英语→目标语言”的增量路线，因此都依赖英语基础包。模型安装到当前小狼毫用户目录下：
 
 ```text
-%APPDATA%\Rime\language_input\remote_cache_v1.json
+<RimeUserDir>\language_input\models\
 ```
 
-远端请求禁止重定向，默认只允许 HTTPS。不要在真实输入中启用 `LANGUAGE_INPUT_REMOTE_ALLOW_HTTP`。
+默认 `<RimeUserDir>` 是 `%APPDATA%\Rime`；如果在小狼毫安装选项中自定义过用户目录，则自动使用该目录。导入后重启小狼毫服务再启用 AI。
+
+AI 成功结果按“模型 + 语言”隔离缓存于：
+
+```text
+<RimeUserDir>\language_input\ai_cache_v2.json
+```
+
+退出小狼毫服务后删除该文件即可清空 AI 译注缓存。删除模型组件不会自动删除缓存。
+
+## 可选兼容 API
+
+源码仍保留 OpenAI Chat Completions 兼容端点，供开发与对比测试使用；正式安装在存在本地 Host 时默认使用本地模型，不需要网络或 API key。只有显式设置 `LANGUAGE_INPUT_REMOTE_ENABLED=1` 时才改用兼容端点。可配置变量见源码中的 `LoadRemoteGlossConfig`；真实 key 不应写入源码、Rime 配置或截图。
+
+兼容 API 每次最多发送当前页 9 个候选文字和目标语言。请求在后台执行，默认拒绝重定向和明文 HTTP。服务运营方可能按其政策记录请求、IP、账户和计费信息，启用前应阅读所选服务的隐私条款。
 
 ## 构建与许可
 
-源代码中的构建、数据来源和验收记录见 `language-input/VERIFICATION.md`。本地英文 GlossPack 是 CC-CEDICT 的改编数据库，按 CC BY-SA 4.0 分发；安装目录 `data\licenses\language-input` 包含完整归属与依赖许可说明。
+构建、数据来源和验收记录见 `language-input/VERIFICATION.md`。`scripts/build_model_host.ps1` 固定并校验 Python 3.11.15、CTranslate2 4.8.1、SentencePiece 0.2.1、NumPy 2.4.6 和 PyInstaller 6.15.0，再生成 windowed x64 Host；`scripts/stage_model_host.ps1` 对暂存 Bundle 逐文件记录大小和 SHA256。
+
+固定英文 GlossPack 是 CC-CEDICT 的改编数据库，按 CC BY-SA 4.0 分发。QuickMT 模型组件按 CC BY 4.0 分发。安装目录 `data\licenses\language-input` 包含完整归属与运行时依赖许可说明。
 
 本地发布包使用 `CN=Language Input Local Build` 的本机自签名证书。签名可以证明安装包和内含的一方二进制在签名后未被修改，但它不是公共商业代码签名信誉。

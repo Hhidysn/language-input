@@ -28,6 +28,10 @@ struct RemoteGlossConfig {
   std::string api_key;
   std::string language = "en";
   std::filesystem::path cache_path;
+  bool use_local_host = false;
+  std::filesystem::path local_host_executable;
+  std::filesystem::path local_host_catalog;
+  std::filesystem::path local_host_models;
   int connect_timeout_ms = 5000;
   int request_timeout_ms = 15000;
 
@@ -38,6 +42,7 @@ using RemoteGlossMap = std::map<std::string, std::string>;
 using RemoteGlossTransport = std::function<std::optional<RemoteGlossMap>(
     const RemoteGlossConfig&,
     const std::vector<std::string>&)>;
+using RemoteGlossCompletion = std::function<void(uintptr_t)>;
 
 // Remote access is disabled unless LANGUAGE_INPUT_REMOTE_ENABLED is true.
 // The API key is read only in that case and is never written to configuration.
@@ -54,7 +59,8 @@ std::optional<RemoteGlossMap> ParseRemoteGlossResponse(
 class RemoteGlossService {
  public:
   explicit RemoteGlossService(RemoteGlossConfig config,
-                              RemoteGlossTransport transport = {});
+                              RemoteGlossTransport transport = {},
+                              RemoteGlossCompletion completion = {});
   ~RemoteGlossService();
 
   RemoteGlossService(const RemoteGlossService&) = delete;
@@ -69,8 +75,10 @@ class RemoteGlossService {
   void SuspendAllSessions();
 
   std::optional<RemoteGloss> Lookup(uintptr_t session_id,
+                                    std::string_view language,
                                     std::string_view word);
   void QueueMissing(uintptr_t session_id,
+                    std::string_view language,
                     const std::vector<std::string>& words);
 
   // Used by the native test executable; production never waits for requests.

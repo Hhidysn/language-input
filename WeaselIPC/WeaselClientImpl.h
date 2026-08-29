@@ -18,6 +18,7 @@ class ClientImpl {
   void EndMaintenance();
   bool Echo();
   bool ProcessKeyEvent(KeyEvent const& keyEvent);
+  void SetAsyncRefreshWindow(HWND window);
   bool CommitComposition();
   bool ClearComposition();
   bool SelectCandidateOnCurrentPage(size_t index);
@@ -42,6 +43,7 @@ class ClientImpl {
   UINT session_id;
   std::wstring app_name;
   bool is_ime;
+  HWND async_refresh_window;
 
   PipeChannel<PipeMessage> channel;
 };

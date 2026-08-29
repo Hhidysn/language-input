@@ -23,13 +23,18 @@ typedef std::map<std::string, AppOptions, CaseInsensitiveCompare>
     AppOptionsByAppName;
 
 struct SessionStatus {
-  SessionStatus() : style(weasel::UIStyle()), __synced(false), session_id(0) {
+  SessionStatus()
+      : style(weasel::UIStyle()),
+        __synced(false),
+        session_id(0),
+        async_refresh_window(nullptr) {
     RIME_STRUCT(RimeStatus, status);
   }
   weasel::UIStyle style;
   RimeStatus status;
   bool __synced;
   RimeSessionId session_id;
+  HWND async_refresh_window;
 };
 typedef std::map<DWORD, SessionStatus> SessionStatusMap;
 typedef DWORD WeaselSessionId;
@@ -68,8 +73,10 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
                          const std::string& opt,
                          bool val);
   virtual void UpdateColorTheme(BOOL darkMode);
+  virtual void RefreshAsync(uintptr_t session_id);
 
   void OnUpdateUI(std::function<void()> const& cb);
+  void SetAsyncRefreshWindow(HWND window);
 
  private:
   void _Setup();
@@ -128,6 +135,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   bool m_global_ascii_mode;
   int m_show_notifications_time;
   DWORD m_pid;
+  HWND m_async_refresh_window;
   std::unique_ptr<weasel::language_input::SpeechService> m_speech;
   std::unique_ptr<weasel::language_input::RemoteGlossService> m_remote_gloss;
 };

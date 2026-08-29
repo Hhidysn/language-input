@@ -15,6 +15,12 @@
 #define WEASEL_IPC_SHARED_MEMORY_SIZE \
   (sizeof(PipeMessage) + WEASEL_IPC_BUFFER_SIZE)
 
+// Private notification used first inside the server process and then for the
+// server-to-TSF refresh signal. It carries no candidate text.
+constexpr UINT WEASEL_LANGUAGE_INPUT_GLOSS_READY = WM_APP + 0x120;
+constexpr wchar_t WEASEL_LANGUAGE_INPUT_REFRESH_WINDOW_CLASS[] =
+    L"WeaselLanguageInputRefreshWindow_1.0";
+
 enum WEASEL_IPC_COMMAND {
   WEASEL_IPC_ECHO = (WM_APP + 1),
   WEASEL_IPC_START_SESSION,
@@ -86,6 +92,7 @@ struct RequestHandler {
   virtual void EndMaintenance() {}
   virtual void SetOption(DWORD session_id, const std::string& opt, bool val) {}
   virtual void UpdateColorTheme(BOOL darkMode) {}
+  virtual void RefreshAsync(uintptr_t session_id) {}
 };
 
 // 處理server端回應之物件
@@ -127,6 +134,8 @@ class Client {
   bool Echo();
   // 请求服务处理按键消息
   bool ProcessKeyEvent(KeyEvent const& keyEvent);
+  // Register a message-only TSF window for background candidate refreshes.
+  void SetAsyncRefreshWindow(HWND window);
   // 上屏正在編輯的文字
   bool CommitComposition();
   // 清除正在編輯的文字
