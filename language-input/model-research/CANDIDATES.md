@@ -38,8 +38,15 @@ occupancy caps remain unexceeded.
 Status: **CTranslate2 4.8.1 QuickMT route selected for practical preview
 integration under the revised 2026-08-29 acceptance contract**.
 
-The pinned runtime candidate is official `ggml-org/llama.cpp` release
-`v0.3.0`, annotated tag target commit
+The product runtime is the CTranslate2-based `LanguageInputModelHost.exe`
+described in [`../MODEL.zh-CN.md`](../MODEL.zh-CN.md). It loads the three
+QuickMT `.limodel` components listed in `models/packs-v2.json`; this is the
+route used by the current installer.
+
+The pinned `ggml-org/llama.cpp` release below belongs to the earlier screening
+of general-purpose LLM candidates. It is retained as research evidence only;
+it is not shipped and is not used for the current QuickMT translation route.
+The research build was release `v0.3.0`, annotated tag target commit
 `c1d0e7a004015f23bc0233470b747b596f29b264`, published 2026-08-25.
 
 Authoritative evidence:
@@ -57,10 +64,11 @@ Authoritative evidence:
   It is MIT; the retrieved UTF-8 text has SHA256
   `94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d`.
 
-The pinned source was built successfully with Visual Studio 2022 for portable
-x64 CPU use (`GGML_NATIVE=OFF`, dynamic CPU backends enabled, CUDA/Vulkan/
-OpenCL/BLAS disabled). The resulting launcher reports build 300 at the pinned
-commit; `llama-server.exe` is 10,752 bytes with SHA256
+For that rejected general-LLM screening, the pinned source was built
+successfully with Visual Studio 2022 for portable x64 CPU use
+(`GGML_NATIVE=OFF`, dynamic CPU backends enabled, CUDA/Vulkan/OpenCL/BLAS
+disabled). The resulting launcher reports build 300 at the pinned commit;
+`llama-server.exe` is 10,752 bytes with SHA256
 `9beafb4c8dc176199865e61b168bcda3cbddf0349b696efb90ab1fa19eba7c6e`.
 Static and real-process checks confirmed Qwen3.5 loading, loopback port-zero
 binding, bearer authentication and schema-constrained chat completions. This

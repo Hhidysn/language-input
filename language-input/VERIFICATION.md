@@ -23,6 +23,12 @@ Do not change a `Pending` row to `Passed` without recording fresh evidence from 
 
 ## v0.2 local-AI release matrix (2026-08-29)
 
+The authoritative description of the model actually used by the installer is
+[`MODEL.zh-CN.md`](MODEL.zh-CN.md). The selected route is QuickMT
+`quickmt-gloss-route-v2` running through CTranslate2; the other model names in
+the research archive are candidates or rejected baselines, not hidden runtime
+dependencies.
+
 | Requirement | Automated evidence | Runtime evidence | Status |
 | --- | --- | --- | --- |
 | English, Japanese and Spanish `.limodel` packs | Whole-pack and per-file SHA256 audit; dependency and atomic-replace tests | Three real packs imported and all three routes produced glosses | Passed |
