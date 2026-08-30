@@ -21,25 +21,140 @@ Baseline: Weasel `9cc96e2` (0.17.4), librime `1c23358` (1.13.1). The librime pri
 
 Do not change a `Pending` row to `Passed` without recording fresh evidence from the final staged and signed artifacts.
 
-## v0.2 local-AI release matrix (2026-08-29)
+## v0.3 local-AI release matrix (2026-08-31)
 
-The authoritative description of the model actually used by the installer is
-[`MODEL.zh-CN.md`](MODEL.zh-CN.md). The selected route is QuickMT
-`quickmt-gloss-route-v2` running through CTranslate2; the other model names in
-the research archive are candidates or rejected baselines, not hidden runtime
-dependencies.
+The authoritative description of the models actually used by the installer is
+[`MODEL.zh-CN.md`](MODEL.zh-CN.md). QuickMT
+`quickmt-gloss-route-v2` remains the default route through CTranslate2; the
+optional M2M100 route is a separate explicitly selected CTranslate2 backend,
+not a hidden QuickMT dependency. Hy-MT2 is historical research only and is not
+part of this release.
 
 | Requirement | Automated evidence | Runtime evidence | Status |
 | --- | --- | --- | --- |
 | English, Japanese and Spanish `.limodel` packs | Whole-pack and per-file SHA256 audit; dependency and atomic-replace tests | Three real packs imported and all three routes produced glosses | Passed |
-| AI output stays distinct from the fixed dictionary | v2 cache tests isolate model and language; Rime option matrix covers dictionary/AI selection | Final installed candidate markers and source switching | Pending |
-| AI never falls back to the fixed dictionary | Source-path review and missing-model behavior tests | Missing-pack behavior in final installed build | Pending |
-| Local Host is loopback-only and authenticated | Host test verifies unauthorized 401, authorized health and idle exit | Final installed loopback process returned 401 without a token, advertised all three languages with the token, and left no listener after exit | Passed |
+| AI output stays distinct from the fixed dictionary | v2 cache tests isolate model and language; Rime option matrix covers dictionary/AI selection | Rime x64/Win32 matrix and installed native M2M100 smoke keep `[en·AI]` separate from dictionary output | Passed |
+| AI never falls back to the fixed dictionary or QuickMT | Source-path review and missing-model behavior tests | Installed Host returned explicit `409 missing-model-component` for a missing M2M100 component, with no QuickMT response | Passed |
+| Local Host is loopback-only and authenticated | Host test verifies unauthorized 401, authorized health and idle exit | Installed loopback process returned 401 without a token, advertised `en,es,ja` with the token, and left no listener after exit | Passed |
 | Password/PIN has zero AI request, cache, display and speech | Native sensitive cancellation, late-result and no-callback tests | Final installed password/PIN controls | Pending |
-| AI completion refreshes the candidate UI | Native completion callback and main-thread state recheck tests | Final Notepad TSF automatic refresh without another key | Pending |
+| AI completion refreshes the candidate UI | Native completion callback and main-thread state recheck tests | Native installed smoke refreshed the candidate result after M2M100 completed, without another key | Passed |
 | Host and installer are reproducible and signed | Pinned Host build script, bundle manifest and Authenticode audit | Installed first-party PE audit and signed 0.17.4.3 installer extraction | Passed |
 
-The three selected packs are individually below 1–2 GB: 409,710,191 bytes (zh→en), 403,642,726 bytes (en→ja), and 403,609,399 bytes (en→es). Japanese and Spanish use an English pivot. Known short-word ambiguity is accepted for vocabulary hints and must remain visible through the `〔<lang>·AI〕` marker.
+The three selected QuickMT packs are individually below 1–2 GB: 409,710,191 bytes (zh→en), 403,642,726 bytes (en→ja), and 403,609,399 bytes (en→es). Japanese and Spanish use an English pivot. Known short-word ambiguity is accepted for vocabulary hints and must remain visible through the `〔<lang>·AI〕` marker.
+
+## M2M100 418M optional backend evidence (2026-08-31, Asia/Shanghai)
+
+M2M100 is an optional experimental backend selected by the user after the
+Hy-MT2 trial was rejected for input-method latency. QuickMT remains the
+default. M2M100 uses its own MIT/CTranslate2 pack format and does not share
+QuickMT components, cache entries or a fallback path.
+
+| Requirement | Fresh evidence | Status |
+| --- | --- | --- |
+| Fixed provenance and independent package | Official `facebook/m2m100_418M` revision `55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636`; source `pytorch_model.bin` 1,935,796,948 bytes, SHA256 `d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1`; converted INT8 runtime 499,724,092 bytes; `.limodel` 499,727,982 bytes, SHA256 `238b1ed0859704b9d220bd40b7a1cabb234454b408f538930b2b6669f1e5a525`; MIT license and NOTICE | Passed |
+| QuickMT default and independent model switch | Rime x64/Win32 matrix: 48 cases per architecture, including saved options, dictionary/AI separation, target-language AI enforcement, sensitive suppression and M2M100 model selection | Passed |
+| Host transport and lifecycle | Installed `LanguageInputModelHost.exe` size 4,892,238 bytes, SHA256 `84148537a96c5ae0444217aaa53205d513df1b21ddf90bb464c774a98d3001d8`; random loopback port, bearer token, Host-owned lifecycle, no external endpoint; installed native x64/Win32 smoke both passed | Passed |
+| Existing 120-entry blind set | Installed Host returned 120/120 legal outputs for English, Japanese and Spanish; ordinary eligible coverage was 96/96 for each language | Measured |
+| Input-method latency and memory | Warm nine-candidate p95: English 749.44 ms, Japanese 902.50 ms, Spanish 794.17 ms; cold requests 1,723.30/1,831.78/1,739.73 ms; peak working set 663,203,840/681,754,624/671,547,392 bytes | Measured |
+| Password/PIN safety fixture | 76 cases: 40/40 unsafe sources suppressed, 36/36 safe sources legally translated; suppression recall and allowed-output rate both 1.0. Sensitive controls do not call Host, cache, display or speech paths | Passed |
+| Missing model behavior | Installed Host returned HTTP 409 `missing-model-component` for an empty model root; no QuickMT or dictionary fallback | Passed |
+| Hy removal from package and installation | Final NSIS archive `weasel-0.1.0-m2m100-20260831-installer.exe`: 41,104,255 bytes, SHA256 `5fe374fe9670d46a97b0177d1c3810c0bb3896d15bf552134fcc5f215a7fa109`; archive and installed directory contain M2M catalog/notice but no GGUF catalog, Hy NOTICE, llama runtime or GGUF/LiModel weight | Passed |
+
+The machine-readable installed-Host benchmark is
+`F:\documents.i-wish-research\language-input-m2m100-418m-20260830\benchmarks\m2m100-installed-host-20260831.json`.
+The research artifacts, source conversion manifest and pack input remain under
+the same research child; model weights are not stored in the repository.
+
+## Retired Hy-MT2 GGUF evidence (2026-08-30, Asia/Shanghai)
+
+This section is retained as an audit trail only. Hy-MT2 was removed from the
+active product, catalog, installer, Host runtime and user model directory on
+2026-08-31 after real input-method testing showed multi-minute cold and long
+candidate-refresh latency. The research copy, package provenance and retired
+installed files remain under
+`F:\documents.i-wish-research\language-input-hy-mt2-20260830`; no active
+release claim below authorizes reinstalling it.
+
+The optional Tencent backend is distributed as an independent Apache-2.0
+component. The GGUF itself is not bundled into the installer; users import the
+audited `.limodel` component, and a selected-but-missing component is an
+explicit error rather than a QuickMT fallback.
+
+| Requirement | Fresh evidence | Status |
+| --- | --- | --- |
+| Fixed model provenance and independent package | HF revision `9df5c824a00a744fb0512a29c640466f4d97dfb0`, model size `461,860,800` bytes, model SHA256 `cc497fe8f033b52b3b8b00a7669e9661435432f9d4cd43f7ed24400c01507a93`, pack size `461,874,574` bytes, pack SHA256 `3d2c9146ecb7c9d9f3570de4464660b6016d363724ea63b3d61d86155e2f531d`, Apache-2.0 license and NOTICE; pack audit/install unit tests | Passed |
+| STQ1_0 runtime compatibility | Patched `llama.cpp` revision `1e411d8f5a1e23525fa3265dfb4bd76265465397`; metadata-gated legacy serialized type-42 mapping for the official Hunyuan 2bit-stride16 file; exact model load and real translation smoke | Passed |
+| QuickMT default and model switch | `tests/test_rime_gloss.ps1`: x64 48/48 and Win32 48/48, including `ModelSelection`, saved options and independent display/speech controls | Passed |
+| Loopback/auth/lifecycle/no external network | Packaged Host benchmark used a random loopback port and bearer token; runtime child is Host-owned, proxy variables/API key are stripped, and benchmark network mode is loopback-only | Passed |
+| Missing model behavior | Packaged Host returned HTTP 409 `missing-model-component` with no fallback when the Hy component directory was absent | Passed |
+| Sensitive controls | x64/Win32 Rime matrices passed `SensitiveSuppression`; sensitive sources are filtered before cache, Host and llama-server request paths, candidate display and speech | Passed |
+| Existing 120-entry blind set | 360 submitted translations (120 each for en/ja/es), 333 legal outputs (92.5% overall): en 111/120 (92.5%), ja 120/120 (100%), es 102/120 (85%). Three batches returned empty numbered lines and were correctly rejected as HTTP 502; this is recorded model-format/coverage behavior, not counted as legal output or silently substituted | Measured |
+| Latency and memory | Overall batch latency p50 69,868 ms, p95 105,096 ms, max 118,759 ms; peak Host 33,816,576 bytes, llama-server 1,132,978,176 bytes, total 1,174,675,456 bytes | Measured |
+| Safety fixture | 76/76: 40/40 unsafe suppressed (recall 1.0), 36/36 safe allowed (specificity 1.0) | Passed |
+
+The machine-readable benchmark evidence is
+`F:\documents.i-wish-research\language-input-hy-mt2-20260830\hy-mt2-benchmark-v1.json`.
+That full run used the immediately prior source-equivalent Host build with SHA256
+`c1f449797138fe51e83833c8b83165d6eb10db97626445f31704f1213f488537`; the
+final staged PyInstaller rebuild has the same recorded source/runtime inputs,
+passed a fresh real-translation/missing-model smoke, and has SHA256
+`dac1e9d8148c5211bd7b51417a499da772ab4dbd3928d4bf87b050cd4879ee79`.
+The invalid batches contained replacement-character/ambiguous corpus entries;
+the direct raw-response reproduction returned numbered blank lines. The Host
+therefore rejected the result, preserving the exact-output contract.
+
+Final staging and packaging evidence: `stage_language_input.ps1` completed with
+197,860 GlossPack entries, page size 9 and zero user databases;
+`stage_model_host.ps1` produced 121 files and 136,805,919 bytes with final Host
+SHA256 `dac1e9d8148c5211bd7b51417a499da772ab4dbd3928d4bf87b050cd4879ee79`.
+NSIS exited 0 and produced
+`output/archives/weasel-0.1.0-test-installer.exe` (44,569,812 bytes,
+SHA256 `6DBEEB98DD3FAB77C7245D304384E8F4F9E6C3BC71159A2E40EA776E15DE41BF`).
+A fresh 7-Zip extraction contained 260 regular files, the GGUF catalog, Hy
+NOTICE, Host and llama-server, zero `.gguf`/`.limodel` files and zero user
+databases. The installed x64 `WeaselServer.exe` is 2,833,920 bytes with SHA256
+`0201692F62AB72CCD5BCB1F5DA0D3064EAED4980F0595AED293E686C29415C9A`;
+installed Host, catalog and NOTICE hashes were also checked against the staged
+artifacts.
+
+After installing that exact archive, a fresh Notepad window selected AI,
+Hy-MT2-1.8B and English, then entered `q`. The candidate list refreshed to
+`[en·AI]` rows such as `器 / instrument` and `去 / go`; the model-cache v3
+contained both the QuickMT and Hy-MT2 keys. The installed direct Host smoke
+returned HTTP 200, advertised `en,es,ja` and translated `量子纠缠` to
+`Quantum entanglement` in 30.8 seconds. Its random loopback port, bearer
+authentication and graceful idle cleanup were observed; no Host or
+llama-server child remained after cleanup.
+
+## Local transport retry hotfix evidence (2026-08-30, Asia/Shanghai)
+
+The interactive local path no longer retries a failed Host/llama request 100
+times. A local transport error now completes the worker once, refreshes the UI
+with `本地 AI 翻译请求失败`, and uses the existing per-word cooldown before a
+later input may retry. This prevents a slow or failed Hy-MT2 batch from keeping
+the worker apparently hung for hours; QuickMT routing and the separate model
+cache remain unchanged.
+
+- The new regression fixture forced a local `kTransport` failure through the
+  Host-owned process path and verified one request, one completion callback and
+  `WaitUntilIdleForTesting(2s)` on both x64 and Win32. Native output was
+  `LanguageInputRemoteTests: all checks passed` for both architectures.
+- Fresh Python tests ran `46/46`, the Rime option matrix ran `48/48` for each
+  x64 and Win32, and `weasel.sln` Release builds completed with zero errors for
+  both architectures.
+- The retry-fix installer is
+  `output/archives/weasel-0.1.0-retryfix-20260830-installer.exe`,
+  `44,564,357` bytes, SHA256
+  `2665163703e60a942ae4ad0948f8d2c4b725d8e24b392d1ee9f914427a5b1c86`.
+  Its archive listing contains the GGUF catalog, Hy NOTICE, Host and
+  `llama-server.exe`; the imported user GGUF remains outside the installer.
+- The installed registry version is `0.1.0.1`; installed x64
+  `WeaselServer.exe` matches the rebuilt binary byte-for-byte
+  (`10b749e4e7c153757d564ff184249ce9510b0d59fcab6aba4d853bd94b5a9736`).
+  The installed C++ WinHTTP smoke used the installed Host and user-imported
+  Hy-MT2 model, returned the exact UTF-8 result `你好` → `Hello`, and completed
+  in about 32.3 seconds. Peak total working set was `834,101,248` bytes; the
+  Host and llama-server children were absent after cleanup.
 
 ## Final 0.17.4.3 installation evidence (2026-08-29, Asia/Shanghai)
 

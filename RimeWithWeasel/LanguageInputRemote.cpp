@@ -183,6 +183,11 @@ std::optional<ParsedEndpoint> ParseEndpoint(const RemoteGlossConfig& config) {
   bool secure = parts.nScheme == INTERNET_SCHEME_HTTPS;
   if (!secure && (parts.nScheme != INTERNET_SCHEME_HTTP || !config.allow_http))
     return std::nullopt;
+  if (config.use_local_host &&
+      (parts.lpszHostName == nullptr ||
+       std::wstring_view(parts.lpszHostName, parts.dwHostNameLength) !=
+           L"127.0.0.1"))
+    return std::nullopt;
 
   ParsedEndpoint result;
   result.host.assign(parts.lpszHostName, parts.dwHostNameLength);
@@ -199,21 +204,29 @@ std::optional<ParsedEndpoint> ParseEndpoint(const RemoteGlossConfig& config) {
   return result;
 }
 
-std::optional<std::string> PostJson(const RemoteGlossConfig& config,
-                                    std::string_view body) {
+struct PostJsonResult {
+  std::optional<std::string> body;
+  RemoteGlossError error = RemoteGlossError::kTransport;
+};
+
+PostJsonResult PostJson(const RemoteGlossConfig& config,
+                        std::string_view body) {
   auto endpoint = ParseEndpoint(config);
   if (!endpoint || body.empty() ||
       body.size() > static_cast<size_t>((std::numeric_limits<DWORD>::max)()))
-    return std::nullopt;
+    return {};
 
   WinHttpHandle session(
-      WinHttpOpen(L"Language Input/0.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+      WinHttpOpen(L"Language Input/0.1",
+                  config.use_local_host ? WINHTTP_ACCESS_TYPE_NO_PROXY
+                                        : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
   if (!session)
-    return std::nullopt;
+    return {};
+  const int request_timeout_ms = config.request_timeout_ms;
   WinHttpSetTimeouts(session.get(), config.connect_timeout_ms,
-                     config.connect_timeout_ms, config.request_timeout_ms,
-                     config.request_timeout_ms);
+                     config.connect_timeout_ms, request_timeout_ms,
+                     request_timeout_ms);
   DWORD secure_protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
   WinHttpSetOption(session.get(), WINHTTP_OPTION_SECURE_PROTOCOLS,
                    &secure_protocols, sizeof(secure_protocols));
@@ -221,14 +234,14 @@ std::optional<std::string> PostJson(const RemoteGlossConfig& config,
   WinHttpHandle connection(
       WinHttpConnect(session.get(), endpoint->host.c_str(), endpoint->port, 0));
   if (!connection)
-    return std::nullopt;
+    return {};
   const wchar_t* accept_types[] = {L"application/json", nullptr};
   WinHttpHandle request(
       WinHttpOpenRequest(connection.get(), L"POST", endpoint->path.c_str(),
                          nullptr, WINHTTP_NO_REFERER, accept_types,
                          endpoint->secure ? WINHTTP_FLAG_SECURE : 0));
   if (!request)
-    return std::nullopt;
+    return {};
 
   DWORD redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
   WinHttpSetOption(request.get(), WINHTTP_OPTION_REDIRECT_POLICY,
@@ -236,7 +249,7 @@ std::optional<std::string> PostJson(const RemoteGlossConfig& config,
 
   auto key = Utf8ToWide(config.api_key);
   if (!key || key->find_first_of(L"\r\n") != std::wstring::npos)
-    return std::nullopt;
+    return {};
   std::wstring headers =
       L"Content-Type: application/json\r\nAccept: application/json\r\n"
       L"Authorization: Bearer ";
@@ -248,45 +261,55 @@ std::optional<std::string> PostJson(const RemoteGlossConfig& config,
   SecureZeroMemory(headers.data(), headers.size() * sizeof(wchar_t));
   SecureZeroMemory(key->data(), key->size() * sizeof(wchar_t));
   if (!sent || !WinHttpReceiveResponse(request.get(), nullptr))
-    return std::nullopt;
+    return {};
 
   DWORD status = 0;
   DWORD status_size = sizeof(status);
   if (!WinHttpQueryHeaders(
           request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
           WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
-          WINHTTP_NO_HEADER_INDEX) ||
-      status < 200 || status >= 300)
-    return std::nullopt;
+          WINHTTP_NO_HEADER_INDEX))
+    return {};
 
   std::string response;
   for (;;) {
     DWORD available = 0;
     if (!WinHttpQueryDataAvailable(request.get(), &available))
-      return std::nullopt;
+      return {};
     if (available == 0)
       break;
     if (available > kMaxResponseBytes - response.size())
-      return std::nullopt;
+      return {};
     size_t offset = response.size();
     response.resize(offset + available);
     DWORD read = 0;
     if (!WinHttpReadData(request.get(), response.data() + offset, available,
                          &read))
-      return std::nullopt;
+      return {};
     response.resize(offset + read);
   }
-  return response;
+  if (status == 409) {
+    if (response.find("missing-model-component") != std::string::npos)
+      return {std::nullopt, RemoteGlossError::kMissingModel};
+    if (response.find("missing-model-runtime") != std::string::npos)
+      return {std::nullopt, RemoteGlossError::kMissingRuntime};
+  }
+  if (status < 200 || status >= 300)
+    return {std::nullopt, RemoteGlossError::kTransport};
+  return {std::move(response), RemoteGlossError::kNone};
 }
 
-std::optional<RemoteGlossMap> DefaultTransport(
+RemoteGlossTransportResult DefaultTransport(
     const RemoteGlossConfig& config,
     const std::vector<std::string>& words) {
   std::string request = BuildRemoteGlossRequest(config, words);
   auto response = PostJson(config, request);
-  if (!response)
-    return std::nullopt;
-  return ParseRemoteGlossResponse(*response, words);
+  if (!response.body)
+    return {std::nullopt, response.error};
+  auto parsed = ParseRemoteGlossResponse(*response.body, words);
+  if (!parsed)
+    return {std::nullopt, RemoteGlossError::kInvalidResponse};
+  return {std::move(*parsed), RemoteGlossError::kNone};
 }
 
 std::wstring QuoteCommandArgument(const std::filesystem::path& path) {
@@ -347,15 +370,22 @@ class LocalHostProcess {
     const unsigned port = 49152 + (port_value % 15000);
     auto executable = QuoteCommandArgument(config.local_host_executable);
     auto catalog = QuoteCommandArgument(config.local_host_catalog);
+    auto m2m100_catalog = config.local_host_m2m100_catalog.empty()
+                              ? std::wstring()
+                              : QuoteCommandArgument(config.local_host_m2m100_catalog);
     auto models = QuoteCommandArgument(config.local_host_models);
     auto wide_token = Utf8ToWide(*token);
-    if (executable.empty() || catalog.empty() || models.empty() || !wide_token)
+    if (executable.empty() || catalog.empty() || models.empty() ||
+        (!config.local_host_m2m100_catalog.empty() && m2m100_catalog.empty()) ||
+        !wide_token)
       return false;
 
     std::wstring command = executable + L" --serve --catalog " + catalog +
                            L" --models " + models + L" --port " +
                            std::to_wstring(port) + L" --token " + *wide_token +
                            L" --idle-seconds 600";
+    if (!m2m100_catalog.empty())
+      command += L" --m2m100-catalog " + m2m100_catalog;
     STARTUPINFOW startup = {};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process = {};
@@ -496,6 +526,9 @@ RemoteGlossConfig LoadRemoteGlossConfig(
   config.local_host_catalog =
       install_dir / L"data" / L"language_input" / L"models" /
       L"packs-v2.json";
+  config.local_host_m2m100_catalog =
+      install_dir / L"data" / L"language_input" / L"models" /
+      L"m2m100-packs-v1.json";
   config.local_host_models = cache_path.parent_path() / L"models";
   config.model = "quickmt-gloss-route-v2";
 
@@ -544,6 +577,8 @@ std::string BuildRemoteGlossRequest(const RemoteGlossConfig& config,
   boost::json::object data;
   data["target_language"] = config.language;
   data["words"] = std::move(word_values);
+  if (config.use_local_host)
+    data["model"] = config.model;
 
   boost::json::array messages;
   messages.emplace_back(boost::json::object{
@@ -613,8 +648,10 @@ class RemoteGlossService::Impl {
     Session& session = sessions_[session_id];
     ++session.generation;
     session.sensitive = sensitive;
-    if (sensitive)
+    if (sensitive) {
+      session.last_error = RemoteGlossError::kNone;
       PurgeQueuedJobsLocked(session_id);
+    }
   }
 
   void RemoveSession(uintptr_t session_id) {
@@ -623,6 +660,7 @@ class RemoteGlossService::Impl {
     if (found != sessions_.end()) {
       ++found->second.generation;
       found->second.sensitive = true;
+      found->second.last_error = RemoteGlossError::kNone;
     }
     PurgeQueuedJobsLocked(session_id);
     sessions_.erase(session_id);
@@ -633,23 +671,32 @@ class RemoteGlossService::Impl {
     for (auto& pair : sessions_) {
       ++pair.second.generation;
       pair.second.sensitive = true;
+      pair.second.last_error = RemoteGlossError::kNone;
     }
     for (const auto& job : jobs_)
       for (const auto& word : job.words)
-        in_flight_.erase(CacheKey(job.language, word));
+        in_flight_.erase(CacheKey(job.model, job.language, word));
     jobs_.clear();
   }
 
   std::optional<RemoteGloss> Lookup(uintptr_t session_id,
                                     std::string_view language,
                                     std::string_view word) {
-    if (!available_ || !IsLanguageCode(language) || !IsValidWord(word))
+    return Lookup(session_id, language, word, config_.model);
+  }
+
+  std::optional<RemoteGloss> Lookup(uintptr_t session_id,
+                                    std::string_view language,
+                                    std::string_view word,
+                                    std::string_view model) {
+    if (!available_ || !IsLanguageCode(language) || !IsValidWord(word) ||
+        !IsSafeHeaderValue(model, 128))
       return std::nullopt;
     std::lock_guard<std::mutex> lock(mutex_);
     if (!IsNormalSessionLocked(session_id))
       return std::nullopt;
     LoadCacheLocked();
-    auto found = cache_.find(CacheKey(language, word));
+    auto found = cache_.find(CacheKey(model, language, word));
     if (found == cache_.end())
       return std::nullopt;
     return RemoteGloss{std::string(language), found->second};
@@ -658,7 +705,15 @@ class RemoteGlossService::Impl {
   void QueueMissing(uintptr_t session_id,
                     std::string_view language,
                     const std::vector<std::string>& words) {
-    if (!available_ || !IsLanguageCode(language) || words.empty())
+    QueueMissing(session_id, language, words, config_.model);
+  }
+
+  void QueueMissing(uintptr_t session_id,
+                    std::string_view language,
+                    const std::vector<std::string>& words,
+                    std::string_view model) {
+    if (!available_ || !IsLanguageCode(language) || words.empty() ||
+        !IsSafeHeaderValue(model, 128))
       return;
     std::lock_guard<std::mutex> lock(mutex_);
     if (!IsNormalSessionLocked(session_id))
@@ -668,12 +723,13 @@ class RemoteGlossService::Impl {
     Job job;
     job.session_id = session_id;
     job.generation = sessions_[session_id].generation;
+    job.model = std::string(model);
     job.language = std::string(language);
     std::unordered_set<std::string> seen;
     for (const auto& word : words) {
       if (job.words.size() >= kMaxWordsPerRequest)
         break;
-      const std::string key = CacheKey(language, word);
+      const std::string key = CacheKey(model, language, word);
       auto retry = retry_after_.find(key);
       if (!IsValidWord(word) || !seen.insert(word).second ||
           cache_.find(key) != cache_.end() ||
@@ -695,22 +751,47 @@ class RemoteGlossService::Impl {
         lock, timeout, [this] { return jobs_.empty() && active_jobs_ == 0; });
   }
 
+  RemoteGlossError TakeLastError(uintptr_t session_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto found = sessions_.find(session_id);
+    if (found == sessions_.end() || found->second.sensitive)
+      return RemoteGlossError::kNone;
+    const auto error = found->second.last_error;
+    found->second.last_error = RemoteGlossError::kNone;
+    return error;
+  }
+
+  void InvalidateSession(uintptr_t session_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto found = sessions_.find(session_id);
+    if (found == sessions_.end())
+      return;
+    ++found->second.generation;
+    found->second.last_error = RemoteGlossError::kNone;
+    PurgeQueuedJobsLocked(session_id);
+  }
+
  private:
   struct Session {
     bool sensitive = true;
     uint64_t generation = 0;
+    RemoteGlossError last_error = RemoteGlossError::kNone;
   };
 
   struct Job {
     uintptr_t session_id = 0;
     uint64_t generation = 0;
+    std::string model;
     std::string language;
     std::vector<std::string> words;
   };
 
-  static std::string CacheKey(std::string_view language,
+  static std::string CacheKey(std::string_view model,
+                              std::string_view language,
                               std::string_view word) {
-    std::string key(language);
+    std::string key(model);
+    key.push_back('\n');
+    key.append(language);
     key.push_back('\n');
     key.append(word);
     return key;
@@ -735,11 +816,19 @@ class RemoteGlossService::Impl {
         continue;
       }
       for (const auto& word : job->words)
-        in_flight_.erase(CacheKey(job->language, word));
+        in_flight_.erase(CacheKey(job->model, job->language, word));
       job = jobs_.erase(job);
     }
     if (jobs_.empty() && active_jobs_ == 0)
       idle_.notify_all();
+  }
+
+  void session_error_locked(uintptr_t session_id, RemoteGlossError error) {
+    auto found = sessions_.find(session_id);
+    if (found == sessions_.end() || found->second.sensitive)
+      return;
+    found->second.last_error =
+        error == RemoteGlossError::kNone ? RemoteGlossError::kTransport : error;
   }
 
   void LoadCacheLocked() {
@@ -763,53 +852,82 @@ class RemoteGlossService::Impl {
     if (!root)
       return;
     const auto* version = root->if_contains("version");
-    const auto* model = root->if_contains("model");
     const auto* entries_value = root->if_contains("entries");
     const auto* entries = entries_value ? entries_value->if_object() : nullptr;
-    if (!version || !version->is_int64() || version->as_int64() != 2 ||
-        !model || !model->is_string() ||
-        std::string_view(model->as_string().data(), model->as_string().size()) !=
-            config_.model ||
-        !entries)
+    if (!version || !version->is_int64() || !entries)
       return;
-    for (const auto& language_entry : *entries) {
-      std::string language(language_entry.key().data(),
-                           language_entry.key().size());
-      const auto* language_entries = language_entry.value().if_object();
-      if (!IsLanguageCode(language) || !language_entries)
-        continue;
-      for (const auto& entry : *language_entries) {
-        if (cache_.size() >= kMaxCacheEntries)
-          break;
-        std::string word(entry.key().data(), entry.key().size());
-        const auto* value = entry.value().if_string();
-        if (!value || !IsValidWord(word))
+    auto load_language_entries = [&](std::string_view model,
+                                     const boost::json::object& language_map) {
+      if (!IsSafeHeaderValue(model, 128))
+        return;
+      for (const auto& language_entry : language_map) {
+        std::string language(language_entry.key().data(),
+                             language_entry.key().size());
+        const auto* language_entries = language_entry.value().if_object();
+        if (!IsLanguageCode(language) || !language_entries)
           continue;
-        auto gloss = CleanGloss(std::string_view(value->data(), value->size()));
-        if (gloss)
-          cache_.emplace(CacheKey(language, word), std::move(*gloss));
+        for (const auto& entry : *language_entries) {
+          if (cache_.size() >= kMaxCacheEntries)
+            break;
+          std::string word(entry.key().data(), entry.key().size());
+          const auto* value = entry.value().if_string();
+          if (!value || !IsValidWord(word))
+            continue;
+          auto gloss =
+              CleanGloss(std::string_view(value->data(), value->size()));
+          if (gloss)
+            cache_.emplace(CacheKey(model, language, word), std::move(*gloss));
+        }
       }
+    };
+    if (version->as_int64() == 2) {
+      const auto* model = root->if_contains("model");
+      if (!model || !model->is_string() ||
+          std::string_view(model->as_string().data(), model->as_string().size()) !=
+              config_.model)
+        return;
+      load_language_entries(config_.model, *entries);
+      return;
+    }
+    if (version->as_int64() != 3)
+      return;
+    for (const auto& model_entry : *entries) {
+      std::string model(model_entry.key().data(), model_entry.key().size());
+      const auto* language_map = model_entry.value().if_object();
+      if (language_map)
+        load_language_entries(model, *language_map);
     }
   }
 
   void PersistCacheLocked() {
     boost::json::object entries;
     for (const auto& entry : cache_) {
-      const size_t separator = entry.first.find('\n');
-      if (separator == std::string::npos)
+      const size_t model_separator = entry.first.find('\n');
+      const size_t language_separator =
+          model_separator == std::string::npos
+              ? std::string::npos
+              : entry.first.find('\n', model_separator + 1);
+      if (model_separator == std::string::npos ||
+          language_separator == std::string::npos)
         continue;
-      const std::string language = entry.first.substr(0, separator);
-      const std::string word = entry.first.substr(separator + 1);
-      auto* language_entries = entries.if_contains(language);
+      const std::string model = entry.first.substr(0, model_separator);
+      const std::string language = entry.first.substr(
+          model_separator + 1, language_separator - model_separator - 1);
+      const std::string word = entry.first.substr(language_separator + 1);
+      auto* model_entries = entries.if_contains(model);
+      if (!model_entries) {
+        entries[model] = boost::json::object();
+        model_entries = entries.if_contains(model);
+      }
+      auto* language_entries = model_entries->as_object().if_contains(language);
       if (!language_entries) {
-        entries[language] = boost::json::object();
-        language_entries = entries.if_contains(language);
+        model_entries->as_object()[language] = boost::json::object();
+        language_entries = model_entries->as_object().if_contains(language);
       }
       language_entries->as_object()[word] = entry.second;
     }
     boost::json::object root;
-    root["version"] = 2;
-    root["model"] = config_.model;
+    root["version"] = 3;
     root["entries"] = std::move(entries);
     std::string data = boost::json::serialize(root);
     if (data.size() > kMaxCacheBytes)
@@ -848,7 +966,7 @@ class RemoteGlossService::Impl {
         jobs_.pop_front();
         if (!IsCurrentJobLocked(job)) {
           for (const auto& word : job.words)
-            in_flight_.erase(CacheKey(job.language, word));
+            in_flight_.erase(CacheKey(job.model, job.language, word));
           if (jobs_.empty() && active_jobs_ == 0)
             idle_.notify_all();
           continue;
@@ -856,16 +974,20 @@ class RemoteGlossService::Impl {
         ++active_jobs_;
       }
 
-      std::optional<RemoteGlossMap> result;
+      RemoteGlossTransportResult transport_result;
       if (!config_.use_local_host || local_host_.EnsureRunning(config_)) {
         RemoteGlossConfig request_config = config_;
         request_config.language = job.language;
-        const int attempts = config_.use_local_host ? 100 : 1;
-        for (int attempt = 0; attempt < attempts && !result; ++attempt) {
-          result = transport_(request_config, job.words);
-          if (!result && config_.use_local_host)
-            Sleep(100);
-        }
+        if (config_.use_local_host)
+          request_config.model = job.model;
+        // A local transport error includes an inference timeout or Host 5xx
+        // response. Retrying a local model request here would duplicate
+        // expensive inference. The result below records the failure and
+        // applies the existing five-minute per-word retry cooldown; a later
+        // input can explicitly try again.
+        transport_result = transport_(request_config, job.words);
+      } else {
+        transport_result.error = RemoteGlossError::kMissingRuntime;
       }
 
       bool notify_completion = false;
@@ -874,21 +996,24 @@ class RemoteGlossService::Impl {
         --active_jobs_;
         bool current = IsCurrentJobLocked(job);
         bool changed = false;
+        const bool success = transport_result.glosses.has_value();
         const auto retry_time = std::chrono::steady_clock::now() +
-                                std::chrono::minutes(result ? 60 : 5);
+                                std::chrono::minutes(success ? 60 : 5);
         for (const auto& word : job.words) {
-          const std::string key = CacheKey(job.language, word);
+          const std::string key = CacheKey(job.model, job.language, word);
           in_flight_.erase(key);
           if (!current)
             continue;
-          auto found = result ? result->find(word) : RemoteGlossMap::iterator{};
-          if (result && found != result->end()) {
-            auto gloss = CleanGloss(found->second);
-            if (gloss && cache_.size() < kMaxCacheEntries) {
-              cache_[key] = std::move(*gloss);
-              retry_after_.erase(key);
-              changed = true;
-              continue;
+          if (success) {
+            auto found = transport_result.glosses->find(word);
+            if (found != transport_result.glosses->end()) {
+              auto gloss = CleanGloss(found->second);
+              if (gloss && cache_.size() < kMaxCacheEntries) {
+                cache_[key] = std::move(*gloss);
+                retry_after_.erase(key);
+                changed = true;
+                continue;
+              }
             }
           }
           retry_after_[key] = retry_time;
@@ -898,6 +1023,10 @@ class RemoteGlossService::Impl {
         // finished, and a post-transition result can never reach this branch.
         if (current && changed) {
           PersistCacheLocked();
+          notify_completion = true;
+        }
+        if (current && !success) {
+          session_error_locked(job.session_id, transport_result.error);
           notify_completion = true;
         }
         if (jobs_.empty() && active_jobs_ == 0)
@@ -959,10 +1088,34 @@ std::optional<RemoteGloss> RemoteGlossService::Lookup(uintptr_t session_id,
   return impl_->Lookup(session_id, language, word);
 }
 
+std::optional<RemoteGloss> RemoteGlossService::Lookup(
+    uintptr_t session_id,
+    std::string_view language,
+    std::string_view word,
+    std::string_view model) {
+  return impl_->Lookup(session_id, language, word, model);
+}
+
 void RemoteGlossService::QueueMissing(uintptr_t session_id,
                                        std::string_view language,
                                        const std::vector<std::string>& words) {
   impl_->QueueMissing(session_id, language, words);
+}
+
+void RemoteGlossService::QueueMissing(
+    uintptr_t session_id,
+    std::string_view language,
+    const std::vector<std::string>& words,
+    std::string_view model) {
+  impl_->QueueMissing(session_id, language, words, model);
+}
+
+RemoteGlossError RemoteGlossService::TakeLastError(uintptr_t session_id) {
+  return impl_->TakeLastError(session_id);
+}
+
+void RemoteGlossService::InvalidateSession(uintptr_t session_id) {
+  impl_->InvalidateSession(session_id);
 }
 
 bool RemoteGlossService::WaitUntilIdleForTesting(

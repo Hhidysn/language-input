@@ -1,11 +1,14 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
-  [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
+  [string]$RepositoryRoot = '',
   [ValidateSet('x64', 'Win32')]
   [string]$Architecture = 'x64'
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+  $RepositoryRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+}
 $root = [IO.Path]::GetFullPath($RepositoryRoot)
 $dataDirectory = Join-Path $root 'output\data'
 $sessionDirectory = [IO.Path]::GetFullPath(
@@ -42,13 +45,28 @@ Copy-Item -Path (Join-Path $dataDirectory '*') `
 function Invoke-RimeSession {
   param([string[]]$Commands)
   Push-Location -LiteralPath $sessionDirectory
+  $stderrPath = Join-Path $sessionDirectory 'rime_api_console.stderr.log'
   try {
-    $result = @($Commands + 'exit') | & $console 2>&1 | Out-String
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      $result = @($Commands + 'exit') | & $console 2> $stderrPath | Out-String
+    } finally {
+      $ErrorActionPreference = $previousErrorActionPreference
+    }
+    $stderr = if (Test-Path -LiteralPath $stderrPath) {
+      [IO.File]::ReadAllText($stderrPath)
+    } else {
+      ''
+    }
     if ($LASTEXITCODE -ne 0) {
-      throw "rime_api_console exited with $LASTEXITCODE`n$result"
+      throw "rime_api_console exited with $LASTEXITCODE`n$result`n$stderr"
     }
     return $result
   } finally {
+    if (Test-Path -LiteralPath $stderrPath) {
+      Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
     Pop-Location
   }
 }
@@ -69,11 +87,12 @@ function Assert-NotMatch {
 
 $defaultText = [IO.File]::ReadAllText((Join-Path $dataDirectory 'default.yaml'))
 $savedOptions = @(
-  'language_input_gloss'
-  'language_input_ai'
-  'language_input_en'
-  'language_input_ja'
-  'language_input_es'
+  'language_input_gloss',
+  'language_input_ai',
+  'language_input_model_m2m100',
+  'language_input_en',
+  'language_input_ja',
+  'language_input_es',
   'language_input_speech'
 )
 foreach ($option in $savedOptions) {
@@ -92,7 +111,7 @@ $schemaCases = @(
     Name = 'Full-pinyin'
     Input = 'nihao'
     NormalizedInput = 'shangtai'
-  }
+  },
   [pscustomobject]@{
     Id = 'language_input_flypy'
     Name = 'Xiaohe double-pinyin'
@@ -105,7 +124,7 @@ $matrixCases = 0
 
 foreach ($schema in $schemaCases) {
   $activation = Invoke-RimeSession @(
-    "select schema $($schema.Id)"
+    "select schema $($schema.Id)",
     $schema.Input
   )
   Assert-Match $activation "schema: $([regex]::Escape($schema.Id)) /" `
@@ -168,29 +187,29 @@ foreach ($schema in $schemaCases) {
   }
 
   $preservedAi = Invoke-RimeSession @(
-    "select schema $($schema.Id)"
-    'set option !language_input_sensitive'
-    'set option language_input_gloss'
-    'set option !language_input_en'
-    'set option !language_input_es'
-    'set option language_input_ja'
-    'set option !language_input_ja'
-    'set option language_input_en'
+    "select schema $($schema.Id)",
+    'set option !language_input_sensitive',
+    'set option language_input_gloss',
+    'set option !language_input_en',
+    'set option !language_input_es',
+    'set option language_input_ja',
+    'set option !language_input_ja',
+    'set option language_input_en',
     $schema.Input
   )
   Assert-NotMatch $preservedAi '1\. \[你好\].*〔en·词〕' `
     "$($schema.Name) did not preserve AI when returning from Japanese to English."
 
   $normalized = Invoke-RimeSession @(
-    "select schema $($schema.Id)"
-    'set option !language_input_sensitive'
-    'set option !language_input_ja'
-    'set option !language_input_es'
-    'set option language_input_en'
-    'set option !language_input_ai'
-    'set option language_input_gloss'
-    'set option !zh_hans'
-    'set option zh_hant'
+    "select schema $($schema.Id)",
+    'set option !language_input_sensitive',
+    'set option !language_input_ja',
+    'set option !language_input_es',
+    'set option language_input_en',
+    'set option !language_input_ai',
+    'set option language_input_gloss',
+    'set option !zh_hans',
+    'set option zh_hant',
     $schema.NormalizedInput
   )
   Assert-Match $normalized '\d+\.\s+(?:\[上臺\]|上臺\s+)〔en·词〕 to rise to power' `
@@ -198,13 +217,13 @@ foreach ($schema in $schemaCases) {
 }
 
 $sensitive = Invoke-RimeSession @(
-  'select schema language_input_pinyin'
-  'set option !language_input_ja'
-  'set option !language_input_es'
-  'set option language_input_en'
-  'set option !language_input_ai'
-  'set option language_input_gloss'
-  'set option language_input_sensitive'
+  'select schema language_input_pinyin',
+  'set option !language_input_ja',
+  'set option !language_input_es',
+  'set option language_input_en',
+  'set option !language_input_ai',
+  'set option language_input_gloss',
+  'set option language_input_sensitive',
   'nihao'
 )
 Assert-Match $sensitive '1\. \[你好\](\r?\n|\s*$)' 'Sensitive mode did not retain the Chinese candidate.'
@@ -213,19 +232,35 @@ if ($sensitive.Contains('〔en·词〕')) {
 }
 
 $selection = Invoke-RimeSession @(
-  'select schema language_input_pinyin'
-  'set option !language_input_ja'
-  'set option !language_input_es'
-  'set option language_input_en'
-  'set option !language_input_ai'
-  'set option language_input_gloss'
-  'nihao'
+  'select schema language_input_pinyin',
+  'set option !language_input_ja',
+  'set option !language_input_es',
+  'set option language_input_en',
+  'set option !language_input_ai',
+  'set option language_input_gloss',
+  'nihao',
   # This test needs only the numeric commit. Sensitive mode deliberately
   # suppresses user-dictionary learning so output/data remains installable.
-  'set option language_input_sensitive'
+  'set option language_input_sensitive',
   '1'
 )
 Assert-Match $selection 'commit: 你好' 'Number-key candidate selection did not commit the first candidate.'
+Assert-NoSharedUserDatabase
+
+$modelSwitch = Invoke-RimeSession @(
+  'select schema language_input_pinyin',
+  'set option !language_input_sensitive',
+  'set option language_input_gloss',
+  'set option language_input_ai',
+  'set option language_input_model_m2m100',
+  'nihao'
+)
+Assert-Match $modelSwitch 'updated option: language_input_model_m2m100 = 1' `
+  'M2M100 model switch did not update independently.'
+Assert-Match $modelSwitch '1\. \[你好\]' `
+  'M2M100 model switch changed the candidate text.'
+Assert-NotMatch $modelSwitch '〔en·词〕' `
+  'M2M100 model switch did not remain in AI mode.'
 Assert-NoSharedUserDatabase
 
 [pscustomobject]@{
@@ -238,4 +273,5 @@ Assert-NoSharedUserDatabase
   SavedOptions = 'passed'
   SensitiveSuppression = 'passed'
   NumericSelection = 'passed'
+  ModelSelection = 'passed'
 }

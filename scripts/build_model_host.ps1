@@ -4,14 +4,25 @@ param(
   [string]$PythonExecutable,
   [Parameter(Mandatory = $true)]
   [string]$BuildRoot,
-  [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
+  [string]$RepositoryRoot
 )
 
 $ErrorActionPreference = 'Stop'
+$utf8NoBom = [Text.UTF8Encoding]::new($false)
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+  $RepositoryRoot = Split-Path -Parent $PSScriptRoot
+}
 $root = [IO.Path]::GetFullPath($RepositoryRoot)
 $python = [IO.Path]::GetFullPath($PythonExecutable)
 $buildRoot = [IO.Path]::GetFullPath($BuildRoot)
 $source = [IO.Path]::GetFullPath((Join-Path $root 'scripts\language_input_model_host.py'))
+
+function Get-RelativePathText {
+  param([string]$BasePath, [string]$TargetPath)
+  $baseUri = [Uri]::new(([IO.Path]::GetFullPath($BasePath).TrimEnd('\') + '\'))
+  $targetUri = [Uri]::new([IO.Path]::GetFullPath($TargetPath))
+  return [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
+}
 
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
   throw "Python executable does not exist: $python"
@@ -89,14 +100,15 @@ if (-not (Test-Path -LiteralPath $hostExe -PathType Leaf) -or
 $files = @(Get-ChildItem -LiteralPath $bundle -Recurse -File -Force)
 $manifest = [ordered]@{
   format = 'language-input-model-host-build-v1'
-  source = [IO.Path]::GetRelativePath($root, $source).Replace('\', '/')
+  source = (Get-RelativePathText $root $source).Replace('\', '/')
   source_sha256 = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
   environment = $expected
   bundle_bytes = ($files | Measure-Object Length -Sum).Sum
   executable_sha256 = (Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $manifestPath = Join-Path $buildRoot 'build-manifest.json'
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
+$manifestText = $manifest | ConvertTo-Json -Depth 5
+[IO.File]::WriteAllText($manifestPath, $manifestText + [Environment]::NewLine, $utf8NoBom)
 
 [pscustomobject]@{
   Bundle = $bundle

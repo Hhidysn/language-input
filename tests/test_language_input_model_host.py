@@ -11,13 +11,18 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from scripts.build_m2m100_model_pack import build_pack as build_m2m100_pack
 from scripts.build_limodel_pack import build_pack
 from scripts.language_input_model_host import (
     audit_pack,
+    audit_m2m100_pack,
     combine_hypotheses,
     install_pack,
+    install_m2m100_pack,
+    installed_m2m100_components,
     installed_components,
     is_unsafe_source,
+    load_m2m100_pack_catalog,
     load_pack_catalog,
 )
 
@@ -131,6 +136,95 @@ class LanguageInputModelHostTests(unittest.TestCase):
         )
         return catalog, packs
 
+    def make_m2m100_pack(self, root: Path) -> tuple[Path, Path]:
+        model_root = root / "m2m100-model"
+        model_root.mkdir()
+        files = {
+            "config.json": b"{}",
+            "model.bin": b"fixture-m2m100-model",
+            "sentencepiece.bpe.model": b"fixture-sentencepiece",
+            "shared_vocabulary.json": b"[]",
+            "vocab.json": b"{}",
+        }
+        for name, payload in files.items():
+            (model_root / name).write_bytes(payload)
+        license_path = root / "LICENSE.txt"
+        license_path.write_text("MIT License\n", encoding="utf-8")
+        notice_path = root / "M2M100-NOTICE.txt"
+        notice_path.write_text("M2M100 attribution\n", encoding="utf-8")
+        input_path = root / "m2m100-input.json"
+        input_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "component_id": "fixture-m2m100",
+                    "display_name": "Fixture M2M100",
+                    "repository": "facebook/m2m100_418M",
+                    "revision": "a" * 40,
+                    "license": "MIT",
+                    "provides": ["en", "ja", "es"],
+                    "requires": [],
+                    "source": {
+                        "file_name": "pytorch_model.bin",
+                        "size": 123,
+                        "sha256": "b" * 64,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        pack = root / "fixture-m2m100.limodel"
+        built = build_m2m100_pack(
+            input_path=input_path,
+            model_root=model_root,
+            license_path=license_path,
+            notice_path=notice_path,
+            output_path=pack,
+        )
+        component = built["manifest"]
+        catalog = root / "m2m100-packs-v1.json"
+        catalog.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "format": "language-input-m2m100-model-pack-v1",
+                    "route_id": "fixture-m2m100",
+                    "runtime": {
+                        "host": "LanguageInputModelHost",
+                        "architecture": "x64",
+                        "ctranslate2": "4.8.1",
+                        "sentencepiece": "0.2.1",
+                    },
+                    "components": [
+                        {
+                            "id": "fixture-m2m100",
+                            "display_name": "Fixture M2M100",
+                            "file_name": pack.name,
+                            "file_size": pack.stat().st_size,
+                            "file_sha256": hashlib.sha256(pack.read_bytes()).hexdigest(),
+                            "revision": "a" * 40,
+                            "repository": "facebook/m2m100_418M",
+                            "provides": ["en", "ja", "es"],
+                            "requires": [],
+                            "license": "MIT",
+                            "license_sha256": component["license_sha256"],
+                            "notice_sha256": component["notice_sha256"],
+                            "runtime_bytes": component["runtime_bytes"],
+                            "files": component["files"],
+                            "source": component["source"],
+                        }
+                    ],
+                    "routes": {
+                        "en": ["fixture-m2m100"],
+                        "ja": ["fixture-m2m100"],
+                        "es": ["fixture-m2m100"],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return pack, catalog
+
     def test_audit_and_install_exact_catalog_pack(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -173,6 +267,92 @@ class LanguageInputModelHostTests(unittest.TestCase):
                 archive.writestr("unexpected.bin", b"tampered")
             with self.assertRaisesRegex(ValueError, "exact artifact"):
                 audit_pack(pack, catalog)
+
+    def test_m2m100_pack_is_independent_and_keeps_mit_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pack, catalog = self.make_m2m100_pack(root)
+            loaded = load_m2m100_pack_catalog(catalog)
+            self.assertEqual("MIT", loaded["components"][0]["license"])
+            audited = audit_m2m100_pack(pack, catalog)
+            self.assertEqual("fixture-m2m100", audited["component"]["id"])
+            models = root / "models"
+            installed = install_m2m100_pack(pack, catalog, models)
+            self.assertEqual("fixture-m2m100", installed["component_id"])
+            self.assertEqual({"fixture-m2m100"}, set(installed_m2m100_components(models)))
+
+    def test_explicit_m2m100_request_reports_missing_model_without_quick_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            quick_catalog, _ = self.make_three_pack_catalog(root)
+            _, m2m100_catalog = self.make_m2m100_pack(root)
+            models = root / "models"
+            token = "m" * 64
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__).parents[1] / "scripts" / "language_input_model_host.py"),
+                    "--serve",
+                    "--catalog",
+                    str(quick_catalog),
+                    "--m2m100-catalog",
+                    str(m2m100_catalog),
+                    "--m2m100",
+                    "--models",
+                    str(models),
+                    "--port",
+                    "0",
+                    "--token",
+                    token,
+                    "--idle-seconds",
+                    "10",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            try:
+                ready = process.stdout.readline().strip() if process.stdout else ""
+                port = int(ready.split()[1])
+                payload = {
+                    "model": "local",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {
+                                    "target_language": "en",
+                                    "words": ["猫"],
+                                    "model": "m2m100-418m-int8",
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                }
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/v1/chat/completions",
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as missing:
+                    urllib.request.urlopen(request, timeout=5)
+                self.assertEqual(409, missing.exception.code)
+                body = json.loads(missing.exception.read().decode("utf-8"))
+                self.assertEqual("missing-model-component", body["error"])
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=2)
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
 
     def test_catalog_rejects_unknown_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

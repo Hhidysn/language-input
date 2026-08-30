@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "format": "language-input-m2m100-model-pack-v1",
+  "route_id": "m2m100-418m-int8",
+  "runtime": {
+    "host": "LanguageInputModelHost",
+    "architecture": "x64",
+    "ctranslate2": "4.8.1",
+    "sentencepiece": "0.2.1"
+  },
+  "components": [
+    {
+      "id": "m2m100-418m-int8",
+      "display_name": "M2M100 418M INT8",
+      "file_name": "m2m100-418m-int8.limodel",
+      "file_size": 499727982,
+      "file_sha256": "238b1ed0859704b9d220bd40b7a1cabb234454b408f538930b2b6669f1e5a525",
+      "revision": "55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636",
+      "repository": "facebook/m2m100_418M",
+      "provides": ["en", "ja", "es"],
+      "requires": [],
+      "license": "MIT",
+      "license_sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85",
+      "notice_sha256": "373aa76ce0f1fa6e7f0526dc7df8955d6e0b546a5452ad1d7dd4421d128e2bbf",
+      "runtime_bytes": 499724092,
+      "files": [
+        {
+          "path": "model/config.json",
+          "size": 233,
+          "sha256": "72901fbd8abd89fb5cf4a388f26fc681f5c4c58a1e1a88b30b879f107270e7ee"
+        },
+        {
+          "path": "model/model.bin",
+          "size": 490667752,
+          "sha256": "a1826980fc5c037e69c7ac94fcb56c03001a66f380eb71863cc0a3879e71421b"
+        },
+        {
+          "path": "model/sentencepiece.bpe.model",
+          "size": 2423393,
+          "sha256": "d8f7c76ed2a5e0822be39f0a4f95a55eb19c78f4593ce609e2edbc2aea4d380a"
+        },
+        {
+          "path": "model/shared_vocabulary.json",
+          "size": 2924622,
+          "sha256": "18916ac68f9ac8fbd5250ca603dcb3861aac8672924d93a8dadc82eb3147f941"
+        },
+        {
+          "path": "model/vocab.json",
+          "size": 3708092,
+          "sha256": "b6e77e474aeea8f441363aca7614317c06381f3eacfe10fb9856d5081d1074cc"
+        }
+      ],
+      "source": {
+        "file_name": "pytorch_model.bin",
+        "size": 1935796948,
+        "sha256": "d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1"
+      }
+    }
+  ],
+  "routes": {
+    "en": ["m2m100-418m-int8"],
+    "ja": ["m2m100-418m-int8"],
+    "es": ["m2m100-418m-int8"]
+  }
+}

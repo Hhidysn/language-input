@@ -6,8 +6,8 @@
   "files": [
     {
       "path": "LanguageInputModelHost.exe",
-      "bytes": 4881784,
-      "sha256": "6706b65e41221ccf51bc31760a19dbaabb8ec09725c3c9e8b7066ee7676d0341"
+      "bytes": 4892238,
+      "sha256": "84148537a96c5ae0444217aaa53205d513df1b21ddf90bb464c774a98d3001d8"
     },
     {
       "path": "_internal/_asyncio.pyd",
@@ -287,7 +287,7 @@
     {
       "path": "_internal/base_library.zip",
       "bytes": 1443233,
-      "sha256": "1eeeb9aae653f5534ce88dcfa1a1ead86600ed22c188e991fd04082acef468e8"
+      "sha256": "2b3ea877849b43418c94108a49fae7cc24f6a31bb01be3078dfee7e157606998"
     },
     {
       "path": "_internal/libcrypto-3-x64.dll",
@@ -452,7 +452,7 @@
     {
       "path": "_internal/numpy-2.4.6.dist-info/RECORD",
       "bytes": 98556,
-      "sha256": "8b00b504aa653b9ebc47652b8d975446c4d1704d912b1537505a1b568ea415ce"
+      "sha256": "003830bd4a1c1ccda8e57a812057cff5aca18cb10121a5a0d5633a9788dce675"
     },
     {
       "path": "_internal/numpy-2.4.6.dist-info/REQUESTED",

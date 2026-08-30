@@ -42,6 +42,12 @@ static std::string LanguageInputTargetLanguage(RimeSessionId session_id) {
   return "en";
 }
 
+static std::string LanguageInputModel(RimeSessionId session_id) {
+  return rime_api->get_option(session_id, "language_input_model_m2m100")
+             ? "m2m100-418m-int8"
+             : "quickmt-gloss-route-v2";
+}
+
 static bool IsLanguageInputRefreshWindow(HWND window) {
   wchar_t class_name[64] = {};
   return window && IsWindow(window) &&
@@ -120,7 +126,7 @@ RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
                      weasel::language_input::RemoteGlossService>(
           weasel::language_input::LoadRemoteGlossConfig(
               WeaselUserDataPath() / L"language_input" /
-              L"ai_cache_v2.json"),
+              L"ai_cache_v3.json"),
           weasel::language_input::RemoteGlossTransport{},
           [this](uintptr_t session_id) {
             HWND window = m_async_refresh_window;
@@ -381,7 +387,7 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
             rime_api->get_option(session_id, "language_input_ai")) {
           auto remote = m_remote_gloss->Lookup(
               session_id, LanguageInputTargetLanguage(session_id),
-              candidate.text);
+              candidate.text, LanguageInputModel(session_id));
           if (remote)
             pending_speech = weasel::language_input::ParseGlossForSpeech(
                 remote->MarkedComment());
@@ -625,7 +631,8 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
     if (remote_enabled && candidate.text &&
         !weasel::language_input::ParseGlossForSpeech(comment)) {
       auto remote =
-          m_remote_gloss->Lookup(session_id, target_language, candidate.text);
+          m_remote_gloss->Lookup(session_id, target_language, candidate.text,
+                                 LanguageInputModel(session_id));
       if (remote) {
         if (!comment.empty())
           comment += "  ";
@@ -649,7 +656,8 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
   cinfo.currentPage = ctx.menu.page_no;
   cinfo.is_last_page = ctx.menu.is_last_page;
   if (remote_enabled && !remote_misses.empty())
-    m_remote_gloss->QueueMissing(session_id, target_language, remote_misses);
+    m_remote_gloss->QueueMissing(session_id, target_language, remote_misses,
+                                 LanguageInputModel(session_id));
 }
 
 void RimeWithWeaselHandler::StartMaintenance() {
@@ -680,6 +688,11 @@ void RimeWithWeaselHandler::SetOption(WeaselSessionId ipc_id,
   } else {
     rime_api->set_option(to_session_id(ipc_id), opt.c_str(), val);
   }
+  if (opt == "language_input_model_m2m100") {
+    const RimeSessionId session_id =
+        to_session_id(ipc_id ? ipc_id : m_active_session);
+    m_remote_gloss->InvalidateSession(session_id);
+  }
 }
 
 void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
@@ -695,6 +708,20 @@ void RimeWithWeaselHandler::RefreshAsync(uintptr_t session_id) {
     if (pair.second.session_id != session_id)
       continue;
     const RimeSessionId current = pair.second.session_id;
+    const auto error = m_remote_gloss->TakeLastError(current);
+    if (error != weasel::language_input::RemoteGlossError::kNone &&
+        !rime_api->get_option(current, "language_input_sensitive")) {
+      m_message_type = "language_input";
+      if (error == weasel::language_input::RemoteGlossError::kMissingModel)
+        m_message_value = "missing-model";
+      else if (error ==
+               weasel::language_input::RemoteGlossError::kMissingRuntime)
+        m_message_value = "missing-runtime";
+      else
+        m_message_value = "request-failed";
+      LOG(WARNING) << "Language Input local AI request failed: "
+                   << m_message_value;
+    }
     if (!rime_api->get_option(current, "language_input_gloss") ||
         !rime_api->get_option(current, "language_input_ai") ||
         rime_api->get_option(current, "language_input_sensitive"))
@@ -905,6 +932,13 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
     }
   } else if (m_message_type == "schema") {
     tips = /*L"【" + */ status.schema_name /* + L"】"*/;
+  } else if (m_message_type == "language_input") {
+    if (m_message_value == "missing-model")
+      tips = L"所选本地 AI 模型未导入，请先导入 .limodel 包";
+    else if (m_message_value == "missing-runtime")
+      tips = L"本地 AI 翻译运行时不可用";
+    else
+      tips = L"本地 AI 翻译请求失败";
   } else if (m_message_type == "option") {
     status.type = SCHEMA;
     if (m_message_value == "!ascii_mode") {

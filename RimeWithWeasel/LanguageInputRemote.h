@@ -31,6 +31,7 @@ struct RemoteGlossConfig {
   bool use_local_host = false;
   std::filesystem::path local_host_executable;
   std::filesystem::path local_host_catalog;
+  std::filesystem::path local_host_m2m100_catalog;
   std::filesystem::path local_host_models;
   int connect_timeout_ms = 5000;
   int request_timeout_ms = 15000;
@@ -39,7 +40,20 @@ struct RemoteGlossConfig {
 };
 
 using RemoteGlossMap = std::map<std::string, std::string>;
-using RemoteGlossTransport = std::function<std::optional<RemoteGlossMap>(
+enum class RemoteGlossError {
+  kNone,
+  kTransport,
+  kMissingModel,
+  kMissingRuntime,
+  kInvalidResponse,
+};
+
+struct RemoteGlossTransportResult {
+  std::optional<RemoteGlossMap> glosses;
+  RemoteGlossError error = RemoteGlossError::kTransport;
+};
+
+using RemoteGlossTransport = std::function<RemoteGlossTransportResult(
     const RemoteGlossConfig&,
     const std::vector<std::string>&)>;
 using RemoteGlossCompletion = std::function<void(uintptr_t)>;
@@ -77,9 +91,22 @@ class RemoteGlossService {
   std::optional<RemoteGloss> Lookup(uintptr_t session_id,
                                     std::string_view language,
                                     std::string_view word);
+  std::optional<RemoteGloss> Lookup(uintptr_t session_id,
+                                    std::string_view language,
+                                    std::string_view word,
+                                    std::string_view model);
   void QueueMissing(uintptr_t session_id,
                     std::string_view language,
                     const std::vector<std::string>& words);
+  void QueueMissing(uintptr_t session_id,
+                    std::string_view language,
+                    const std::vector<std::string>& words,
+                    std::string_view model);
+
+  // Errors are consumed by the UI refresh path. Sensitive sessions never
+  // expose an error and never retain one for later display.
+  RemoteGlossError TakeLastError(uintptr_t session_id);
+  void InvalidateSession(uintptr_t session_id);
 
   // Used by the native test executable; production never waits for requests.
   bool WaitUntilIdleForTesting(std::chrono::milliseconds timeout);

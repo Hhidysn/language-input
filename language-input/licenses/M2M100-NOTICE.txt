@@ -1,0 +1,10 @@
+M2M100 418M model attribution
+
+Upstream model: facebook/m2m100_418M
+Pinned upstream revision: 55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636
+License: MIT
+
+This Language Input component uses the official M2M100 418M checkpoint,
+converted to CTranslate2 INT8 for offline CPU inference. The source checkpoint
+artifact recorded for provenance is pytorch_model.bin, 1935796948 bytes,
+SHA256 d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1.

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "component_id": "m2m100-418m-int8",
+  "display_name": "M2M100 418M INT8",
+  "repository": "facebook/m2m100_418M",
+  "revision": "55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636",
+  "license": "MIT",
+  "provides": ["en", "ja", "es"],
+  "requires": [],
+  "source": {
+    "file_name": "pytorch_model.bin",
+    "size": 1935796948,
+    "sha256": "d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1"
+  }
+}

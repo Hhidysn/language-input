@@ -317,6 +317,17 @@ program_files:
   File "model-host\LanguageInputModelHost.exe"
   SetOutPath $INSTDIR\_internal
   File /r "model-host\_internal\*.*"
+  ; Remove files from the retired Hy-MT2/llama.cpp preview on upgrade.
+  Delete "$INSTDIR\llama-server.exe"
+  Delete "$INSTDIR\ggml-base.dll"
+  Delete "$INSTDIR\ggml-cpu.dll"
+  Delete "$INSTDIR\ggml.dll"
+  Delete "$INSTDIR\llama-common.dll"
+  Delete "$INSTDIR\llama-server-impl.dll"
+  Delete "$INSTDIR\llama.dll"
+  Delete "$INSTDIR\mtmd.dll"
+  Delete "$INSTDIR\data\language_input\models\gguf-packs-v1.json"
+  Delete "$INSTDIR\data\licenses\language-input\HY-MT2-APACHE-2.0-NOTICE.txt"
   ; shared data files
   SetOutPath $INSTDIR\data
   File "data\*.yaml"
@@ -337,6 +348,7 @@ program_files:
   File "data\language_input\gloss\en.manifest.json"
   SetOutPath $INSTDIR\data\language_input\models
   File "data\language_input\models\packs-v2.json"
+  File "data\language_input\models\m2m100-packs-v1.json"
   SetOutPath $INSTDIR\data\licenses\language-input
   File "data\licenses\language-input\*.txt"
 
@@ -417,7 +429,7 @@ Section "Start Menu Shortcuts"
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORAPPFOLDER).lnk" "$INSTDIR\WeaselServer.exe" "/weaseldir" "$SYSDIR\shell32.dll" 19
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUPDATER).lnk" "$INSTDIR\WeaselServer.exe" "/update" "$SYSDIR\shell32.dll" 13
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
-  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORMODELS).lnk" "$INSTDIR\LanguageInputModelHost.exe" '--manage --catalog "$INSTDIR\data\language_input\models\packs-v2.json"' "$SYSDIR\shell32.dll" 167
+  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORMODELS).lnk" "$INSTDIR\LanguageInputModelHost.exe" '--manage --catalog "$INSTDIR\data\language_input\models\packs-v2.json" --m2m100-catalog "$INSTDIR\data\language_input\models\m2m100-packs-v1.json"' "$SYSDIR\shell32.dll" 167
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
 
 SectionEnd

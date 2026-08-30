@@ -5,14 +5,15 @@
 - 固定 GlossPack 和本地 AI 都在电脑上离线运行；输入时不会下载模型，也不会把候选发送到互联网。
 - AI 语言包只能由用户通过管理入口显式选择并导入，导入前会校验包与包内文件。
 - 本地 Host 仅监听随机的 `127.0.0.1` 端口，使用当前进程随机生成的 64 字符令牌；令牌不写入配置、缓存或日志。
-- Host 不记录候选内容，随小狼毫服务退出，并在 10 分钟没有合格请求后自行退出。
+- Host 不记录候选内容，随小狼毫服务退出，并在 10 分钟没有合格请求后自行退出。QuickMT 和 M2M100 都在 Host 进程内按需加载，Host 不继承远端 API key 或代理配置。
+- `AI 模型：QuickMT / M2M100 418M` 只在 AI 来源下选择后端；选择 M2M100 后若模型未导入会明确报错，不会静默请求 QuickMT 或词典。
 - 只有用户显式设置 `LANGUAGE_INPUT_REMOTE_ENABLED=1`，才会改用兼容 API。
 
 ## 本地保存什么
 
-导入的模型位于 `<RimeUserDir>\language_input\models`。AI 成功结果写入 `<RimeUserDir>\language_input\ai_cache_v2.json`，按模型和目标语言隔离。缓存包含曾查询的普通候选词及其释义，不包含令牌或 API key。
+导入的模型位于 `<RimeUserDir>\language_input\models`。AI 成功结果写入 `<RimeUserDir>\language_input\ai_cache_v3.json`，按模型和目标语言隔离。缓存包含曾查询的普通候选词及其释义，不包含令牌或 API key。
 
-默认 `<RimeUserDir>` 为 `%APPDATA%\Rime`，也可能是用户在小狼毫安装选项中指定的目录。退出小狼毫服务后，可以删除 `ai_cache_v2.json` 清空 AI 缓存；模型包需要由用户单独删除或替换。
+默认 `<RimeUserDir>` 为 `%APPDATA%\Rime`，也可能是用户在小狼毫安装选项中指定的目录。退出小狼毫服务后，可以删除 `ai_cache_v3.json` 清空 AI 缓存；模型包需要由用户单独删除或替换。QuickMT 和 M2M100 的缓存键空间彼此隔离。
 
 固定词典模式读取安装目录中的英文 GlossPack，不创建 AI 缓存。AI 模式不读取固定 GlossPack 作为回退。
 

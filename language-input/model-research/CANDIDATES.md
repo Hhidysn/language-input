@@ -1,9 +1,12 @@
 # Language Input local-model candidates
 
-Research dates: 2026-08-26 through 2026-08-29
-Status: QuickMT three-language route selected for a practical input-method preview
-Approved research directory:
-`F:\documents\.i-wish-research\language-input-ai-models-20260826`
+Research dates: 2026-08-26 through 2026-08-31
+Status: QuickMT remains the default; M2M100 418M INT8 is an optional
+experimental input-method backend; Hy-MT2 is retired
+Approved research directories:
+- Historical candidate screening: `F:\documents\.i-wish-research\language-input-ai-models-20260826`
+- M2M100 integration: `F:\documents.i-wish-research\language-input-m2m100-418m-20260830`
+- Retired Hy-MT2 integration: `F:\documents.i-wish-research\language-input-hy-mt2-20260830`
 
 ## Research boundary
 
@@ -24,19 +27,18 @@ the initial transfer estimate 6,484,643,520 bytes (6.039 GiB). The immutable
 download inventory is also recorded in the workflow-owned
 `provenance/research-gate-v1.json` before any weight is downloaded.
 
-The user explicitly raised the transfer cap to 30 GiB on 2026-08-27. Current
-conservative accounting after all three QuickMT components is 23,676,384,782
-network bytes and 24,222,601,740 bytes of research-child occupancy. The ledger includes
-the pinned 4,958,230,644-byte weight, 12,206 bytes of fixed-revision manifest,
-configuration and model-card data, the offline INT8 conversion, two full local
-benchmark passes and the blind-review artifacts. No additional candidate is
-the verified QuickMT English, Japanese and Spanish files. The network and
+The user explicitly raised the transfer cap to 30 GiB on 2026-08-27. The
+historical accounting below covers the original QuickMT/shortlist screening.
+The later M2M100 integration used the separate approved child
+`F:\documents.i-wish-research\language-input-m2m100-418m-20260830`; its source,
+conversion, pack and benchmark manifests are retained there. The network and
 occupancy caps remain unexceeded.
 
 ## Runtime decision
 
-Status: **CTranslate2 4.8.1 QuickMT route selected for practical preview
-integration under the revised 2026-08-29 acceptance contract**.
+Status: **CTranslate2 4.8.1 QuickMT route remains the default; M2M100 418M
+INT8 is an optional experimental backend under the 2026-08-31 acceptance
+contract**.
 
 The product runtime is the CTranslate2-based `LanguageInputModelHost.exe`
 described in [`../MODEL.zh-CN.md`](../MODEL.zh-CN.md). It loads the three
@@ -259,6 +261,28 @@ working set of 970,801,152 bytes. The adjudicated 180-item blind review
 91.1% agreement, Cohen's kappa about 0.802) rejected it at 76.7% English,
 80.0% Japanese and 73.3% Spanish.
 
+#### Product integration trial (2026-08-31)
+
+The user nevertheless requested a practical input-method trial. The converted
+runtime was packaged independently as `m2m100-418m-int8.limodel`
+(`499,727,982` bytes, SHA256
+`238b1ed0859704b9d220bd40b7a1cabb234454b408f538930b2b6669f1e5a525`) with
+MIT license and NOTICE files. It is now an optional product backend behind
+`AI 模型：M2M100 418M`; QuickMT remains the default and the two pack/catalog
+formats are not interchangeable.
+
+The product Host benchmark used the existing 120-entry set and the installed
+x64 PyInstaller Host (`4,892,238` bytes, SHA256
+`84148537a96c5ae0444217aaa53205d513df1b21ddf90bb464c774a98d3001d8`). It
+produced 120/120 legal outputs for each of English, Japanese and Spanish, with
+ordinary eligible coverage 96/96 for each. Warm nine-candidate p95 was
+880.92/1,143.98/873.39 ms and peak working set was
+664,711,168/679,407,616/666,841,088 bytes. The safety fixture suppressed
+40/40 unsafe cases and allowed 36/36 safe cases. A missing component returned
+HTTP 409 `missing-model-component`; it did not fall back to QuickMT. Full
+machine-readable evidence is under
+`F:\documents.i-wish-research\language-input-m2m100-418m-20260830\benchmarks`.
+
 ### OPUS and post-edit experiments
 
 Permissively licensed OPUS direct/pivot routes were fast but failed semantics;
@@ -376,6 +400,37 @@ was 100% English, 98.96% Japanese and 100% Spanish. Warm nine-candidate p95 was
 now dropped individually, Japanese beams prefer target-script output, and up
 to two distinct concise glosses are shown. Compact evidence is in
 `model-research/quickmt-practical-v2.json`.
+
+### 2026-08-30 optional Hy-MT2 backend addendum — retired
+
+This addendum is historical. Hy-MT2 was removed from the active product and
+user model directory on 2026-08-31 after real input-method testing showed
+multi-minute cold and long candidate-refresh latency. The research and
+retired installed copy remain under
+`F:\documents.i-wish-research\language-input-hy-mt2-20260830`; it is not a
+current candidate or release dependency.
+
+Tencent `Hy-MT2-1.8B-1.25Bit-GGUF` was integrated as an optional backend after
+the user confirmed the architecture plan. It is not a replacement for the
+QuickMT default. The downloaded research copy and provenance report are kept
+under `F:\documents.i-wish-research\language-input-hy-mt2-20260830`; the
+project does not store the 461,860,800-byte model weight.
+
+The exact Hugging Face revision is
+`9df5c824a00a744fb0512a29c640466f4d97dfb0`, with model SHA256
+`cc497fe8f033b52b3b8b00a7669e9661435432f9d4cd43f7ed24400c01507a93`. The
+independent package is `hy-mt2-1-8b-1-25bit.limodel`, Apache-2.0, and has
+package SHA256
+`3d2c9146ecb7c9d9f3570de4464660b6016d363724ea63b3d61d86155e2f531d`.
+It uses a separate `gguf-packs-v1.json` catalog and does not share the
+QuickMT/CC-BY pack validator.
+
+The Host bundle owns `llama-server.exe` as a loopback-only, token-authenticated
+child process. Its llama.cpp revision is
+`1e411d8f5a1e23525fa3265dfb4bd76265465397`, with the metadata-gated legacy
+serialized type-42 to `STQ1_0` compatibility mapping needed by the official
+file. The 120-entry blind-set, safety, latency, memory and missing-model
+measurements are recorded in the research report when the final run completes.
 
 ## Screened-out candidates
 

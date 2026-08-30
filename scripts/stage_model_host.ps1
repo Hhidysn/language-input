@@ -2,15 +2,26 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$HostBundle,
-  [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
+  [string]$RepositoryRoot
 )
 
 $ErrorActionPreference = 'Stop'
+$utf8NoBom = [Text.UTF8Encoding]::new($false)
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+  $RepositoryRoot = Split-Path -Parent $PSScriptRoot
+}
 $root = [IO.Path]::GetFullPath($RepositoryRoot)
 $outputRoot = [IO.Path]::GetFullPath((Join-Path $root 'output'))
 $source = [IO.Path]::GetFullPath($HostBundle)
 $destination = [IO.Path]::GetFullPath((Join-Path $outputRoot 'model-host'))
 $outputPrefix = $outputRoot.TrimEnd('\') + '\'
+
+function Get-RelativePathText {
+  param([string]$BasePath, [string]$TargetPath)
+  $baseUri = [Uri]::new(([IO.Path]::GetFullPath($BasePath).TrimEnd('\') + '\'))
+  $targetUri = [Uri]::new([IO.Path]::GetFullPath($TargetPath))
+  return [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
+}
 
 if (-not $destination.StartsWith($outputPrefix, [StringComparison]::OrdinalIgnoreCase)) {
   throw "Model-host destination escaped output: $destination"
@@ -36,7 +47,6 @@ $files = @(Get-ChildItem -LiteralPath $source -Recurse -File -Force)
 if ($files.Count -eq 0 -or @($files | Where-Object Extension -eq '.pdb').Count -ne 0) {
   throw 'HostBundle is empty or contains debug symbols.'
 }
-
 if (Test-Path -LiteralPath $destination) {
   $resolvedDestination = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $destination))
   if (-not $resolvedDestination.StartsWith($outputPrefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -47,7 +57,7 @@ if (Test-Path -LiteralPath $destination) {
 New-Item -ItemType Directory -Path $destination | Out-Null
 
 $manifestFiles = foreach ($file in $files) {
-  $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
+  $relative = Get-RelativePathText $source $file.FullName
   $target = [IO.Path]::GetFullPath((Join-Path $destination $relative))
   if (-not $target.StartsWith($destination.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw "Host staging target escaped destination: $target"
@@ -68,7 +78,8 @@ $manifest = [ordered]@{
   files = @($manifestFiles)
 }
 $manifestPath = Join-Path $outputRoot 'model-host.manifest.json'
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
+$manifestText = $manifest | ConvertTo-Json -Depth 5
+[IO.File]::WriteAllText($manifestPath, $manifestText + [Environment]::NewLine, $utf8NoBom)
 
 [pscustomobject]@{
   Destination = $destination

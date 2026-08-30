@@ -1,10 +1,13 @@
 [CmdletBinding()]
 param(
-  [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
+  [string]$RepositoryRoot
 )
 
 $ErrorActionPreference = 'Stop'
 $utf8NoBom = [Text.UTF8Encoding]::new($false)
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+  $RepositoryRoot = Split-Path -Parent $PSScriptRoot
+}
 $root = [IO.Path]::GetFullPath($RepositoryRoot)
 $sourceRoot = Join-Path $root 'language-input'
 $rimeSource = Join-Path $sourceRoot 'rime'
@@ -12,8 +15,20 @@ $licenseSource = Join-Path $sourceRoot 'licenses'
 $readmeSource = Join-Path $sourceRoot 'README.zh-CN.md'
 $privacySource = Join-Path $sourceRoot 'PRIVACY.zh-CN.md'
 $modelCatalogSource = Join-Path $sourceRoot 'models\packs-v2.json'
+$m2m100CatalogSource = Join-Path $sourceRoot 'models\m2m100-packs-v1.json'
 $outputData = Join-Path $root 'output\data'
 $outputRoot = Join-Path $root 'output'
+$obsoleteOutputFiles = @(
+  (Join-Path $outputData 'language_input\models\gguf-packs-v1.json'),
+  (Join-Path $outputData 'licenses\language-input\HY-MT2-APACHE-2.0-NOTICE.txt')
+)
+
+function Get-RelativePathText {
+  param([string]$BasePath, [string]$TargetPath)
+  $baseUri = [Uri]::new(([IO.Path]::GetFullPath($BasePath).TrimEnd('\') + '\'))
+  $targetUri = [Uri]::new([IO.Path]::GetFullPath($TargetPath))
+  return [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
+}
 
 foreach ($required in @(
   $rimeSource,
@@ -21,10 +36,17 @@ foreach ($required in @(
   $readmeSource,
   $privacySource,
   $modelCatalogSource,
+  $m2m100CatalogSource,
   $outputData
 )) {
   if (-not (Test-Path -LiteralPath $required)) {
     throw "Required staging path is missing: $required"
+  }
+}
+
+foreach ($obsolete in $obsoleteOutputFiles) {
+  if (Test-Path -LiteralPath $obsolete -PathType Leaf) {
+    Remove-Item -LiteralPath $obsolete -Force
   }
 }
 
@@ -40,7 +62,7 @@ function Copy-TreeFiles {
   param([string]$Source, [string]$Destination)
   $destinationPrefix = [IO.Path]::GetFullPath($Destination).TrimEnd('\') + '\'
   foreach ($file in Get-ChildItem -LiteralPath $Source -File -Recurse) {
-    $relative = [IO.Path]::GetRelativePath($Source, $file.FullName)
+    $relative = Get-RelativePathText $Source $file.FullName
     $target = [IO.Path]::GetFullPath((Join-Path $Destination $relative))
     if (-not $target.StartsWith($destinationPrefix, [StringComparison]::OrdinalIgnoreCase)) {
       throw "Staging target escaped output data directory: $target"
@@ -56,6 +78,8 @@ Copy-TreeFiles $licenseSource (Join-Path $outputData 'licenses\language-input')
 New-Item -ItemType Directory -Path (Join-Path $outputData 'language_input\models') -Force | Out-Null
 Copy-Item -LiteralPath $modelCatalogSource `
   -Destination (Join-Path $outputData 'language_input\models\packs-v2.json') -Force
+Copy-Item -LiteralPath $m2m100CatalogSource `
+  -Destination (Join-Path $outputData 'language_input\models\m2m100-packs-v1.json') -Force
 Copy-Item -LiteralPath $readmeSource `
   -Destination (Join-Path $outputRoot 'LANGUAGE-INPUT-README.txt') -Force
 Copy-Item -LiteralPath $privacySource `
@@ -85,6 +109,7 @@ $defaultText = $pageSizePattern.Replace($defaultText, '${1} 9', 1)
 $desiredSavedOptions = @(
   'language_input_gloss'
   'language_input_ai'
+  'language_input_model_m2m100'
   'language_input_en'
   'language_input_ja'
   'language_input_es'

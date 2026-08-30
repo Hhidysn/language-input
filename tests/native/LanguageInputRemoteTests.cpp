@@ -58,10 +58,71 @@ void WriteCache(const std::filesystem::path& path,
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
+  if (argc > 1 && std::wstring(argv[1]) == L"--serve") {
+    // Test-only child used to exercise the local-host worker path without
+    // starting a real model runtime.
+    std::this_thread::sleep_for(std::chrono::seconds(30));
+    return 0;
+  }
+
+  if (argc == 4 && std::wstring(argv[1]) == L"--installed-smoke") {
+    using namespace std::chrono_literals;
+    using weasel::language_input::RemoteGlossConfig;
+    using weasel::language_input::RemoteGlossError;
+    using weasel::language_input::RemoteGlossService;
+
+    const auto install_root = std::filesystem::absolute(argv[2]);
+    const auto model_root = std::filesystem::absolute(argv[3]);
+    const auto smoke_root =
+        std::filesystem::absolute(L".cache") /
+        (L"installed-remote-smoke-" + std::to_wstring(GetCurrentProcessId()));
+    std::error_code smoke_error;
+    std::filesystem::remove_all(smoke_root, smoke_error);
+    std::filesystem::create_directories(smoke_root);
+
+    RemoteGlossConfig config;
+    config.enabled = true;
+    config.use_local_host = true;
+    config.model = "m2m100-418m-int8";
+    config.language = "en";
+    config.cache_path = smoke_root / L"cache.json";
+    config.local_host_executable = install_root / L"LanguageInputModelHost.exe";
+    config.local_host_catalog =
+        install_root / L"data" / L"language_input" / L"models" /
+        L"packs-v2.json";
+    config.local_host_m2m100_catalog =
+        install_root / L"data" / L"language_input" / L"models" /
+        L"m2m100-packs-v1.json";
+    config.local_host_models = model_root;
+
+    std::atomic<int> completions = 0;
+    {
+      RemoteGlossService service(config, {}, [&](uintptr_t) { ++completions; });
+      Check(service.available(), "the installed C++ smoke configuration is usable");
+      service.SetSessionSensitive(42, false);
+      service.QueueMissing(42, "en", {u8"你好"}, config.model);
+      Check(service.WaitUntilIdleForTesting(90s),
+            "the installed C++ smoke request should finish");
+      auto gloss = service.Lookup(42, "en", u8"你好", config.model);
+      Check(gloss && gloss->text == "Hello",
+            "the installed C++ smoke request should return the M2M100 gloss");
+      Check(service.TakeLastError(42) == RemoteGlossError::kNone,
+            "the installed C++ smoke request should not report an error");
+      Check(completions == 1,
+            "the installed C++ smoke request should refresh the UI once");
+    }
+    std::filesystem::remove_all(smoke_root, smoke_error);
+    if (failures == 0)
+      std::cout << "LanguageInputRemoteInstalledSmoke: passed\n";
+    return failures == 0 ? 0 : 1;
+  }
+
   using namespace std::chrono_literals;
   using weasel::language_input::BuildRemoteGlossRequest;
   using weasel::language_input::ParseRemoteGlossResponse;
   using weasel::language_input::RemoteGlossMap;
+  using weasel::language_input::RemoteGlossError;
+  using weasel::language_input::RemoteGlossTransportResult;
   using weasel::language_input::RemoteGlossService;
 
   if (argc != 2) {
@@ -111,10 +172,10 @@ int wmain(int argc, wchar_t** argv) {
   std::vector<std::string> received_words;
   auto normal_transport = [&](const auto&,
                               const std::vector<std::string>& words)
-      -> std::optional<RemoteGlossMap> {
+      -> RemoteGlossTransportResult {
     ++normal_calls;
     received_words = words;
-    return RemoteGlossMap{{u8"缺词", "missing term"}};
+    return {RemoteGlossMap{{u8"缺词", "missing term"}}, RemoteGlossError::kNone};
   };
   {
     RemoteGlossService service(
@@ -144,11 +205,12 @@ int wmain(int argc, wchar_t** argv) {
   std::vector<std::string> requested_languages;
   auto language_transport =
       [&](const auto& request_config,
-          const std::vector<std::string>&) -> std::optional<RemoteGlossMap> {
+          const std::vector<std::string>&) -> RemoteGlossTransportResult {
     requested_languages.push_back(request_config.language);
-    return RemoteGlossMap{{u8"文件夹",
-                           request_config.language == "ja" ? u8"フォルダ"
-                                                            : "folder"}};
+    return {RemoteGlossMap{{u8"文件夹",
+                            request_config.language == "ja" ? u8"フォルダ"
+                                                             : "folder"}},
+            RemoteGlossError::kNone};
   };
   {
     RemoteGlossService service(
@@ -168,6 +230,100 @@ int wmain(int argc, wchar_t** argv) {
           "the same candidate must keep independent language cache entries");
     Check(requested_languages == std::vector<std::string>({"en", "ja"}),
           "each queued language must reach the transport independently");
+  }
+
+  std::vector<std::string> requested_models;
+  auto model_transport =
+      [&](const auto& request_config,
+          const std::vector<std::string>&) -> RemoteGlossTransportResult {
+    requested_models.push_back(request_config.model);
+    return {RemoteGlossMap{{u8"模型词",
+                            requested_models.size() == 1
+                                ? "Quick gloss"
+                                : "M2M100 gloss"}},
+            RemoteGlossError::kNone};
+  };
+  {
+    RemoteGlossService service(
+        TestConfig(test_root / L"models" / L"cache.json"), model_transport);
+    service.SetSessionSensitive(5, false);
+    service.QueueMissing(5, "en", {u8"模型词"}, "quickmt-gloss-route-v2");
+    Check(service.WaitUntilIdleForTesting(2s),
+          "the QuickMT model request should finish");
+    service.QueueMissing(5, "en", {u8"模型词"}, "m2m100-418m-int8");
+    Check(service.WaitUntilIdleForTesting(2s),
+          "the M2M100 model request should finish");
+    auto quick = service.Lookup(5, "en", u8"模型词", "quickmt-gloss-route-v2");
+    auto m2m100 = service.Lookup(5, "en", u8"模型词", "m2m100-418m-int8");
+    Check(quick && quick->text == "Quick gloss" && m2m100 &&
+              m2m100->text == "M2M100 gloss",
+          "model selection must isolate cache entries");
+    Check(requested_models == std::vector<std::string>({"test-model", "test-model"}),
+          "legacy remote model selection must remain unchanged");
+  }
+
+  std::atomic<int> missing_completions = 0;
+  auto missing_model_transport =
+      [&](const auto&, const std::vector<std::string>&)
+          -> RemoteGlossTransportResult {
+    return {std::nullopt, RemoteGlossError::kMissingModel};
+  };
+  {
+    RemoteGlossService service(
+        TestConfig(test_root / L"missing" / L"cache.json"),
+        missing_model_transport,
+        [&](uintptr_t) { ++missing_completions; });
+    service.SetSessionSensitive(6, false);
+    service.QueueMissing(6, "en", {u8"未导入"}, "m2m100-418m-int8");
+    Check(service.WaitUntilIdleForTesting(2s),
+          "the missing-model request should finish without blocking");
+    Check(service.TakeLastError(6) == RemoteGlossError::kMissingModel,
+          "missing model must be surfaced as a typed error");
+    Check(service.TakeLastError(6) == RemoteGlossError::kNone,
+          "consuming a model error must clear it");
+    Check(missing_completions == 1,
+          "a missing model must refresh the UI with an explicit error");
+  }
+
+  std::atomic<int> local_transport_failures = 0;
+  std::atomic<int> local_failure_completions = 0;
+  auto local_failure_transport =
+      [&](const auto&, const std::vector<std::string>&)
+          -> RemoteGlossTransportResult {
+    ++local_transport_failures;
+    return {std::nullopt, RemoteGlossError::kTransport};
+  };
+  {
+    const auto local_failure_root = test_root / L"local-transport-failure";
+    std::filesystem::create_directories(local_failure_root / L"models");
+    const auto local_failure_cache = local_failure_root / L"cache.json";
+    {
+      std::ofstream stream(local_failure_cache,
+                           std::ios::binary | std::ios::trunc);
+      stream << "{}";
+    }
+    auto local_config = TestConfig(local_failure_cache);
+    local_config.use_local_host = true;
+    local_config.model = "m2m100-418m-int8";
+    local_config.local_host_executable =
+        std::filesystem::absolute(std::filesystem::path(argv[0]));
+    local_config.local_host_catalog = local_failure_cache;
+    local_config.local_host_models = local_failure_root / L"models";
+    RemoteGlossService service(
+        local_config, local_failure_transport,
+        [&](uintptr_t) { ++local_failure_completions; });
+    Check(service.available(),
+          "the local transport retry regression fixture must be usable");
+    service.SetSessionSensitive(7, false);
+    service.QueueMissing(7, "en", {u8"本地失败"}, local_config.model);
+    Check(service.WaitUntilIdleForTesting(2s),
+          "a local transport failure must finish without repeated retries");
+    Check(local_transport_failures == 1,
+          "a local transport failure must issue exactly one request");
+    Check(service.TakeLastError(7) == RemoteGlossError::kTransport,
+          "a local transport failure must be surfaced to the UI");
+    Check(local_failure_completions == 1,
+          "a local transport failure must refresh the UI once");
   }
 
   const auto lazy_cache = test_root / L"lazy" / L"cache.json";
@@ -191,12 +347,13 @@ int wmain(int argc, wchar_t** argv) {
   bool release = false;
   auto delayed_transport =
       [&](const auto&,
-          const std::vector<std::string>&) -> std::optional<RemoteGlossMap> {
+          const std::vector<std::string>&) -> RemoteGlossTransportResult {
     std::unique_lock<std::mutex> lock(gate_mutex);
     started = true;
     gate.notify_all();
     gate.wait(lock, [&] { return release; });
-    return RemoteGlossMap{{u8"敏感词", "sensitive term"}};
+    return {RemoteGlossMap{{u8"敏感词", "sensitive term"}},
+            RemoteGlossError::kNone};
   };
   const auto dropped_cache = test_root / L"dropped" / L"cache.json";
   std::atomic<int> dropped_completions = 0;
