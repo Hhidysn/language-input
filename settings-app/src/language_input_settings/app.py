@@ -224,7 +224,6 @@ try:  # pragma: no cover - exercised by the smoke test
         QFormLayout,
         QFrame,
         QGridLayout,
-        QGroupBox,
         QHBoxLayout,
         QHeaderView,
         QLabel,
@@ -594,18 +593,18 @@ if _HAS_QT:
         def set_state(self, state: str) -> None:
             color = self._COLORS.get(state, self._COLORS["neutral"])
             self.setStyleSheet(
-                f"background-color: {color}; border-radius: {self._size // 2}px;"
+                f"background-color: {color}; border-radius: 999px;"
             )
 
     class StateChip(QLabel):
-        """A pill-shaped state chip (green-subtle / neutral)."""
+        """A pill-shaped state chip (semantic tint + contrast-safe text)."""
 
         _STYLES = {
-            "success": ("#1E8E3E", "#EAF6EE"),
-            "neutral": ("#5A6672", "#EEF1F5"),
-            "warning": ("#B26A00", "#FBF1E1"),
-            "error": ("#C62828", "#FBE9E9"),
-            "accent": ("#2F6FEB", "#EAF1FE"),
+            "success": ("#146C2E", "#F0F8F1"),
+            "neutral": ("#5A6672", "#F2F4F7"),
+            "warning": ("#8A5200", "#FBF4E9"),
+            "error": ("#C62828", "#FCF0F0"),
+            "accent": ("#2456B8", "#EAF1FE"),
         }
 
         def __init__(self, text: str, state: str = "neutral", parent=None) -> None:
@@ -613,8 +612,8 @@ if _HAS_QT:
             self.setAlignment(Qt.AlignCenter)
             fg, bg = self._STYLES.get(state, self._STYLES["neutral"])
             self.setStyleSheet(
-                f"color: {fg}; background-color: {bg}; border-radius: 10px;"
-                " padding: 2px 10px; font-size: 12px; font-weight: 600;"
+                f"color: {fg}; background-color: {bg}; border-radius: 999px;"
+                " padding: 2px 8px; font-size: 12px; font-weight: 600;"
             )
 
     class Card(QFrame):

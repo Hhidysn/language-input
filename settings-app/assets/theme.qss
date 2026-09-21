@@ -7,7 +7,16 @@
  *   accent        #2F6FEB      hover         #2A63D2      pressed  #2456B8
  *   accent-subtle #EAF1FE      hover overlay #EEF1F5
  *   success #1E8E3E  warning #B26A00  error #C62828  neutral dot #9AA4AF
+ *   status chip bg: success #F0F8F1  warning #FBF4E9  error #FCF0F0  neutral #F2F4F7
  *   table header bg #F2F4F7
+ *   derived tints (listed, per the design-system allowance): none beyond the above.
+ *
+ * Added tokens (documented; WCAG 4.5:1-driven):
+ *   success-strong #146C2E   (6.04:1 on #F0F8F1, 6.53:1 on #FFFFFF)
+ *   warning-strong #8A5200   (5.85:1 on #FBF4E9, 6.39:1 on #FFFFFF)
+ *   The base semantic colours are below 4.5:1 as 12px text on their tints
+ *   (#1E8E3E on #F0F8F1 = 3.89:1, #B26A00 on #FBF4E9 = 3.88:1), so the
+ *   *-strong pair is used whenever success/warning is rendered as small text.
  *
  * Type:  page title 18/600 · section heading 14/600 · body 13/400 · caption 12/400
  * Space: 4 / 8 / 12 / 16 / 24 / 32      Radius: 6 controls · 8 cards · pill chips
@@ -125,7 +134,7 @@ QLabel#Caption {
 }
 
 QLabel#Caption[state="warning"] {
-    color: #B26A00;
+    color: #8A5200;
 }
 
 QLabel#CardLabel {
@@ -176,21 +185,21 @@ QLabel#StatusStrip {
 }
 
 QLabel#StatusStrip[state="success"] {
-    color: #1E8E3E;
+    color: #146C2E;
     background-color: #F0F8F1;
-    border-color: #BFE3C7;
+    border-color: #1E8E3E;
 }
 
 QLabel#StatusStrip[state="warning"] {
-    color: #B26A00;
+    color: #8A5200;
     background-color: #FBF4E9;
-    border-color: #EAD5AE;
+    border-color: #B26A00;
 }
 
 QLabel#StatusStrip[state="error"] {
     color: #C62828;
     background-color: #FCF0F0;
-    border-color: #EBC2C2;
+    border-color: #C62828;
 }
 
 QLabel#StatusText {
@@ -216,7 +225,7 @@ QListWidget#NavList::item {
     height: 36px;
     padding-left: 8px;
     padding-right: 8px;
-    border-left: 3px solid transparent;
+    border-left: 4px solid transparent;
     color: #5A6672;
 }
 
@@ -226,8 +235,12 @@ QListWidget#NavList::item:hover {
 
 QListWidget#NavList::item:selected {
     background-color: #EAF1FE;
-    color: #2F6FEB;
-    border-left: 3px solid #2F6FEB;
+    color: #2456B8;
+    border-left: 4px solid #2F6FEB;
+}
+
+QListWidget#NavList::item:disabled {
+    color: #9AA4AF;
 }
 
 /* --- cards ---------------------------------------------------------------- */
@@ -240,15 +253,12 @@ QWidget#CollapsibleContent {
 }
 
 QWidget#CardInner,
-QWidget#Inline,
-QWidget#CellBox,
-QWidget#PageRoot {
+QWidget#CellBox {
     background: transparent;
 }
 
-QWidget#PageRoot {
-    background-color: #F7F8FA;
-}
+/* QWidget#PageRoot intentionally has no rule: it inherits the global
+ * QWidget background (#F7F8FA), so defining it again would be a duplicate. */
 
 QScrollArea {
     border: none;
@@ -270,15 +280,21 @@ QToolButton#CollapsibleHeader:hover {
     background-color: #EEF1F5;
 }
 
-QToolButton#CollapsibleHeader:focus {
-    border: 2px solid #2F6FEB;
+QToolButton#CollapsibleHeader:pressed {
+    background-color: #E3E6EA;
 }
 
-QFrame#Separator {
-    background-color: #E3E6EA;
-    border: none;
-    max-height: 1px;
-    min-height: 1px;
+QToolButton#CollapsibleHeader:checked {
+    background-color: #F2F4F7;
+}
+
+QToolButton#CollapsibleHeader:disabled {
+    color: #9AA4AF;
+    border-color: #E3E6EA;
+}
+
+QToolButton#CollapsibleHeader:focus {
+    border: 2px solid #2F6FEB;
 }
 
 /* --- buttons -------------------------------------------------------------- */
@@ -347,6 +363,16 @@ QPushButton#TertiaryButton:hover {
     color: #1B1F24;
 }
 
+QPushButton#TertiaryButton:pressed {
+    background-color: #E3E6EA;
+    color: #1B1F24;
+}
+
+QPushButton#TertiaryButton:disabled {
+    background-color: transparent;
+    color: #9AA4AF;
+}
+
 QPushButton#TertiaryButton:focus {
     border: 2px solid #2F6FEB;
     border-radius: 6px;
@@ -374,10 +400,23 @@ QPushButton#SegmentedButton:hover {
     background-color: #EEF1F5;
 }
 
+QPushButton#SegmentedButton:pressed {
+    background-color: #E3E6EA;
+}
+
 QPushButton#SegmentedButton:checked {
     background-color: #2F6FEB;
     color: #FFFFFF;
     font-weight: 600;
+}
+
+QPushButton#SegmentedButton:checked:pressed {
+    background-color: #2456B8;
+}
+
+QPushButton#SegmentedButton:disabled {
+    background-color: transparent;
+    color: #9AA4AF;
 }
 
 QPushButton#SegmentedButton:focus {
@@ -421,7 +460,7 @@ QDoubleSpinBox:disabled {
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: center right;
-    width: 22px;
+    width: 24px;
     border: none;
     background: transparent;
 }
@@ -472,6 +511,23 @@ QTableView::item:selected {
     color: #1B1F24;
 }
 
+QTableWidget::item:hover,
+QTableView::item:hover {
+    background-color: #EEF1F5;
+}
+
+QTableWidget:focus,
+QTableView:focus {
+    border: 2px solid #2F6FEB;
+}
+
+QTableWidget:disabled,
+QTableView:disabled {
+    color: #9AA4AF;
+    background-color: #F7F8FA;
+    border-color: #E3E6EA;
+}
+
 QHeaderView {
     background-color: #F2F4F7;
     border: none;
@@ -482,7 +538,7 @@ QHeaderView::section {
     color: #5A6672;
     font-size: 12px;
     font-weight: 600;
-    padding: 6px 8px;
+    padding: 4px 8px;
     border: none;
     border-bottom: 1px solid #E3E6EA;
     border-right: 1px solid #F2F4F7;
@@ -527,7 +583,11 @@ QMenu::item {
 
 QMenu::item:selected {
     background-color: #EAF1FE;
-    color: #2F6FEB;
+    color: #2456B8;
+}
+
+QMenu::item:disabled {
+    color: #9AA4AF;
 }
 
 QMenu::separator {
