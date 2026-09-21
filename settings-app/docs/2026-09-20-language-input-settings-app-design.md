@@ -13,6 +13,7 @@
 |---|---|---|
 | 1 | 多模型 council（4 席） | 跑通 **3/4**（gemini 席位 `Not Found`）。裁决 sound-with-fixes，指出 rev1 机制错误 |
 | 2 | **Codex CLI**（命令行 `codex exec --model gpt-6-astra`，只读沙箱） | **成功**。裁决 **REVISE**，指出 rev2 仍有 6 项 behavior-breaking 错误 |
+| 3 | **GLM**（独立第三方审阅，审阅**当前 tree**） | **成功**。提出 B1–B4 / S1–S8 / N1–N4。逐条复核：**全部 CONFIRMED 并修复**（无 NOT-REPRODUCED）；另有 D1 暂缓。见下方「GLM 审阅处置」。 |
 
 **Codex 用文件行号更正了 council 的 5 处过度断言**（本 rev3 已采纳）：
 1. `custom_phrase` **确实存在**（`output\data\luna_pinyin.schema.yaml:69` 注册 `table_translator@custom_phrase`，`stabledb`）——council 说"仅见于 CHANGELOG"是错的。
@@ -24,6 +25,33 @@
 **仍未完成**：council 的 gemini 席位未运行（可选补第 5 席）。
 
 > rev3 的所有机制以**两轮审阅给出的源码行号**为准。
+
+### GLM 审阅处置（rev7 追加）
+
+GLM 审阅的是**当前 tree**（此前已加入 `winproc.py` 的免控制台重构），因此其行号与旧审阅不同、部分行号已位移。逐条复核结论如下：**全部 CONFIRMED 并已修复，无 NOT-REPRODUCED 项**。
+
+| 编号 | 结论 | 修复 |
+|---|---|---|
+| **B1** | ✅ CONFIRMED：`apply_backend` 的 `expected` 只收 `new_env` 中存在的键；`local` 删除全部 `LANGUAGE_INPUT_REMOTE_*`，于是 `expected == {}`、校验恒真；`result["started"]` 也无条件置真 | 对**全部** `REMOTE_VARS` 取值（缺失记 `None` = 必须不存在）；`_verify_env` 读不到环境块时不判成功；必须有 PID 才 `started`/`ok` |
+| **B2** | ✅ CONFIRMED：`set_switches` 在 server 运行中写 `user.yaml`，无停止/守护/重启 | 抽出可复用上下文管理器 `server.server_stopped`；开关写入走 停→写→重启 事务 |
+| **B3** | ✅ CONFIRMED：模型安装只*断言*已停止，不停 server/host、不持互斥体 | 整个 backup/swap/rollback（含 `recover_interrupted`）包进 `server.maintenance_guard()`；先停 server+host；保留 `assert_host_stopped` 作最终校验 |
+| **B4** | ✅ CONFIRMED：`maintenance_guard` 的返回值被调用方丢弃，`CreateMutexW` 失败仍照常运行 | Windows 上获取失败改为致命（抛 `ServerError`）；非 Windows 仍返回 bool |
+| **S1** | ✅ CONFIRMED：`save_config` 覆盖 `config.json` 无备份 | 内容变化时先备份 |
+| **S2** | ✅ CONFIRMED：`gloss_badge._write_shadow` 无备份 | 内容变化时先备份（与 `revert_plain_gloss` 一致） |
+| **S3** | ✅ CONFIRMED：关于页 `_on_redeploy` 只看退出码 0 | 要求 stderr 为空才算成功 |
+| **S4** | ✅ CONFIRMED：`start_minimized` 无人读取，自启动会弹窗 | 新增 `--start-minimized`（隐藏到托盘）并用于 `packaging\autostart.ps1`；持久设置亦被读取 |
+| **S5** | ✅ CONFIRMED：卸载器不清理应用的 `<schema>.custom.yaml`（学习可能保持关闭），且 `*.bak-*` 递归清扫过宽 | 只移除应用写入的键（`switches/@N/reset`、`translator/enable_user_dict`），空文件删除；`*.bak-*` 仅清扫应用自己的备份目标 |
+| **S6** | ✅ CONFIRMED：`weasel.custom.yaml` 的嵌套 `patch:` 读得到、写/删却只认扁平键（静默失败） | 改用 ruamel round-trip 文档，按**扁平路径**解析读与写/删（同 `schema_patch.py`） |
+| **S7** | ✅ CONFIRMED：`resume_from` 未以 `expected_size` 为界，过期/超大的 `.part` 会发出越界 `Range`（416）并永久重试 | `resume_from >= expected_size` 时丢弃 `.part` 重新下载 |
+| **S8** | ✅ CONFIRMED：容器校验用**未解析**的 root 对比已解析路径，相对 `--model-root` 会被判「逃逸」 | 先解析 root |
+| **N1** | ✅ CONFIRMED：`cmd_set_style` 用恒为 dict 的 `changes` 判成败 | 改用 `changed` / `clean` |
+| **N2** | ✅ CONFIRMED：`--m2m100` 无 QuickMT catalog 时会把字面量 `"None"` 当 `--catalog` | 先校验 QuickMT catalog |
+| **N3** | ✅ CONFIRMED：`_read_text` 用 `Path.read_text`（已归一化换行），正则里的 `\r?` 与「CRLF 源」注释是死代码 | 删除 `\r?` 与相关注释 |
+| **N4** | ✅ CONFIRMED：`set_user_yaml_option` 先备份再做 no-op 判断，重复应用堆积备份 | 先判断再备份 |
+
+**D1（暂缓，不实施）**：所有实机操作（apply/sync/neutralize/install）都在 Qt 主线程上跑完整个 停/轮询/启动 事务，UI 会冻结。修复方向见 §11 R26。
+
+**行尾**：本项目已统一 **LF**（不再保留 CRLF）。`--selftest` 与所有写入路径均输出 UTF-8 无 BOM + LF；`.gitattributes` 移除了 PowerShell 的 CRLF 例外。
 
 ### M0 去风险实验结果（rev4 追加）
 
@@ -158,6 +186,9 @@
 
 ### 5.6 配置写入规范（rev3 收敛）
 - 写前备份 + 原子写（temp+`os.replace`）+ UTF-8 无 BOM + LF + 2 空格。
+- **行尾统一 LF（rev7）**：**不保留 CRLF**。应用写出的每一个文件都是 LF；`.gitattributes` 亦不再给 PowerShell 保留 CRLF 例外。
+- **`weasel.custom.yaml` 用 ruamel round-trip 编辑**：读写都按**扁平路径**解析（`style/font_point` 与嵌套 `style:\n  font_point:` 等价），保留注释与无关结构；`<schema>.custom.yaml` 同法。`user.yaml` 仍用定点文本编辑（见下）。
+- **实机写 `user.yaml` 必须在停 server 的窗口内**：由 `server.server_stopped` 事务完成（持 `WeaselDeployerExclusiveMutex` → 停 server/等 host → 原子写 → 以原 env 重启）。
 - **`user.yaml` 有覆盖竞态**：Server 以 `auto_save=true` 在内存持有并会整档回写 → **停 server → 等退出 → 原子写 → 启动**；写入**必须保留** `var/last_build_time`、`var/previously_selected_schema`、`var/schema_access_time` 及既有 `var/option/*`。
 - **修正（Codex）**：不要一概断言"往返解析必然破坏"。`__include`/`__patch`/斜杠路径是**普通 YAML**（`config_data.cc:39` 用 `YAML::Load`）→ 应**实测保持性**（section 往返对比），仅在实测失败时改用定点块替换。定点替换还需处理**流式映射、带引号键、既有嵌套映射**。
 - **配置归属要有落点**：应用自有的 YAML 文件若不被现有配置 `__include`/`__patch` 引用则**无效**；必须写明挂接点与优先级。
@@ -296,6 +327,8 @@ QuickMT 三件套 ≈ 1.22GB；M2M100 ≈ 500MB。
 | **R22** | **替换已存在组件需 backup/swap/rollback** | 复用 host 逻辑 + 等待 host 进程退出（§7.3，V12） |
 | **R23** | **词典译注与 AI 开关相互独立（Lua 强制）** | UI 建模为受约束选择（§5.7，V5） |
 | **R24** | 配置归属缺少挂接点 | 写明 `__include`/`__patch` 挂接点与优先级（§5.6） |
+| **R25** | **GLM 第三方审阅**（审阅当前 tree）发现的实机缺陷 | ✅ 全部核实为真并修复（B1–B4 / S1–S8 / N1–N4，见 §0「GLM 审阅处置」） |
+| **R26** | **实机事务阻塞 Qt 主线程**（apply / sync / neutralize / install 期间 UI 冻结） | **TODO（暂缓，D1）**：把整个 停/轮询/启动 事务移入 `QThread`，用 `signal`/`slot` 回主线程更新 UI；worker 内绝不直接操作 `QWidget` |
 
 ## 12. 里程碑（先验证，再写码）
 
@@ -337,5 +370,8 @@ QuickMT 三件套 ≈ 1.22GB；M2M100 ≈ 500MB。
 | 18 | M2 翻译页 / M4 记忆页 / M5 外观与按键页 / M6 打包 | ✅ 全部完成 |
 | 19 | 三页功能化（外观 / 按键与开关 / 词库与记忆） | ✅ 完成并实测（测试改动均已回滚，`user.yaml` / `weasel.custom.yaml` 哈希与起始一致） |
 | 20 | 外部 UI 审阅（**agy** / Google Antigravity，独立模型） | ✅ 完成。C1–C6 复核确认为真并已修复；**C7 部分不成立**（"API 卡片会被禁用"为误判，按钮位置问题为真） |
-| 21 | 代码仓：`F:\documents\software\langInput`（`third-party/` 已 gitignore；`.gitattributes` 固定源文件 LF、PowerShell CRLF） | ✅ 已建（34 个跟踪文件） |
+| 21 | 代码仓：`F:\documents\software\langInput`（`third-party/` 已 gitignore；`.gitattributes` 全源文件 **LF**，含 PowerShell） | ✅ 已建 |
 | 22 | **Codex CLI 复审** | ⏳ **未完成**：撞 ChatGPT 用量上限（`try again at 3:40 AM`），退出码 1、无产出 → 需重试 |
+| 23 | **GLM 第三方审阅**（独立模型，审阅当前 tree） | ✅ 完成。B1–B4 / S1–S8 / N1–N4 **全部 CONFIRMED 并已修复**；无 NOT-REPRODUCED 项（§0「GLM 审阅处置」） |
+| 24 | **D1（暂缓，不实施）**：实机事务阻塞 Qt 主线程 | ⏳ 记录于 §11 R26；方向 = `QThread` + signal/slot，不在本次实施 |
+| 25 | 行尾统一 **LF**（不再保留 CRLF）；移除 `.gitattributes` 的 PowerShell CRLF 例外 | ✅ 已定并落地 |

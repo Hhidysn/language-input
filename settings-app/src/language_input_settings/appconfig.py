@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from .yaml_io import atomic_write_text
+from .yaml_io import atomic_write_text, backup_file
 
 __all__ = [
     "AppConfig",
@@ -102,10 +102,23 @@ def load_config() -> AppConfig:
 
 
 def save_config(config: AppConfig) -> Path:
-    """Atomically persist ``config`` as UTF-8 (no BOM) JSON with LF newlines."""
+    """Atomically persist ``config`` as UTF-8 (no BOM) JSON with LF newlines.
+
+    An existing ``config.json`` is backed up first (``<name>.bak-<stamp>``) --
+    but only when the serialized content actually changes, so re-saving an
+    unchanged configuration does not accumulate backups (S1).
+    """
     config.normalise()
     text = json.dumps(config.to_dict(), indent=2, ensure_ascii=False) + "\n"
-    return atomic_write_text(config_path(), text)
+    path = config_path()
+    if path.is_file():
+        try:
+            if path.read_text(encoding="utf-8-sig") == text:
+                return path
+        except OSError:
+            pass
+        backup_file(path)
+    return atomic_write_text(path, text)
 
 
 # --- DPAPI secret handling --------------------------------------------------

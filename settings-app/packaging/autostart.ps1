@@ -11,11 +11,12 @@
 
     The command points at the bundled executable, e.g.::
 
-        "C:\...\settings-app\dist\LanguageInputSettings\LanguageInputSettings.exe"
+        "C:\...\settings-app\dist\LanguageInputSettings\LanguageInputSettings.exe" --start-minimized
 
-    The current application does **not** implement a ``--start-minimized``
-    command-line switch (minimised start is instead a persisted setting in
-    ``%APPDATA%\LanguageInput\config.json``), so the entry is written plain.
+    The application implements the ``--start-minimized`` switch (it starts
+    hidden in the system tray instead of popping the settings window), so the
+    autostart entry passes it.  The persisted ``start_minimized`` setting in
+    ``%APPDATA%\LanguageInput\config.json`` is honoured as well.
 
     All three actions are idempotent and print the resulting registry state.
 
@@ -92,8 +93,9 @@ switch ($true) {
         if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) {
             Write-Warning "Executable not found yet: $ExePath (building it first? run packaging\build.ps1)."
         }
-        # REG_SZ command line: quoted exe path, no extra switch.
-        $command = '"{0}"' -f $ExePath
+        # REG_SZ command line: quoted exe path + --start-minimized (no window
+        # on login; the app starts hidden in the tray).
+        $command = '"{0}" --start-minimized' -f $ExePath
         if (-not (Test-Path -LiteralPath $RunKey)) {
             New-Item -Path $RunKey -Force | Out-Null
         }

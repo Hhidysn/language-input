@@ -211,6 +211,11 @@ def download_file(
 
     part = dest.with_name(dest.name + ".part")
     resume_from = part.stat().st_size if (resume and part.is_file()) else 0
+    # A stale or oversized ``.part`` makes the server reject a ``Range`` past
+    # EOF (HTTP 416); without this bound every retry would repeat forever (S7).
+    if expected_size is not None and resume_from >= expected_size:
+        _discard(part)
+        resume_from = 0
     started = time.monotonic()
 
     try:

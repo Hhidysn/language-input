@@ -62,17 +62,17 @@ PLAIN_MARKER = 'env.marker = ""'
 
 # Matches exactly one ``env.marker = <value>`` assignment line, tolerating
 # leading/trailing whitespace.  ``env.marker`` may not be followed by another
-# word character (so ``env.marker_foo`` is not matched) and the value group
-# excludes newlines; an optional ``\r`` is preserved so a CRLF source file is
-# not silently rewritten on the untouched lines.
+# word character (so ``env.marker_foo`` is not matched).  ``_read_text`` reads
+# in text mode, which already normalises ``\r\n`` to ``\n`` (and the project
+# standardises on LF), so no ``\r`` handling is needed here (N3).
 _MARKER_LINE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)env\.marker[ \t]*=[ \t]*(?P<value>[^\r\n]*?)(?P<eol>\r?)$",
+    r"^(?P<indent>[ \t]*)env\.marker[ \t]*=.*$",
     re.MULTILINE,
 )
 
 # Recognises the already-plain assignment (idempotency / state probing).
 _MARKER_EMPTY_RE = re.compile(
-    r'^[ \t]*env\.marker[ \t]*=[ \t]*""[ \t]*\r?$',
+    r'^[ \t]*env\.marker[ \t]*=[ \t]*""[ \t]*$',
     re.MULTILINE,
 )
 
@@ -126,7 +126,7 @@ def marker_line_replacement(text: str) -> str:
             "(the shipped filter may have changed)"
         )
     match = matches[0]
-    replacement = f"{match.group('indent')}{PLAIN_MARKER}{match.group('eol')}"
+    replacement = f"{match.group('indent')}{PLAIN_MARKER}"
     return text[: match.start()] + replacement + text[match.end() :]
 
 
@@ -138,11 +138,25 @@ def _read_text(path: Path) -> str:
 
 
 def _write_shadow(shadow: Path, text: str) -> dict[str, Any]:
-    """Atomically write the shadow copy (UTF-8 no BOM, LF) and verify it."""
+    """Atomically write the shadow copy (UTF-8 no BOM, LF) and verify it.
+
+    An existing shadow copy is backed up first (unless the content is already
+    identical), matching :func:`revert_plain_gloss` and the project-wide
+    backup-before-overwrite rule (S2).
+    """
+    backup: Path | None = None
+    if shadow.is_file():
+        try:
+            existing = shadow.read_text(encoding="utf-8-sig")
+        except OSError:
+            existing = None
+        if existing != text:
+            backup = yaml_io.backup_file(shadow)
     yaml_io.atomic_write_text(shadow, text)
     raw = shadow.read_bytes()
     return {
         "shadow_path": str(shadow),
+        "backup_path": str(backup) if backup else None,
         "bytes_written": len(raw),
         "no_bom": not raw.startswith(b"\xef\xbb\xbf"),
         "lf_only": b"\r" not in raw,

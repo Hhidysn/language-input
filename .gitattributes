@@ -16,9 +16,10 @@
 .gitignore text eol=lf
 .gitattributes text eol=lf
 
-# Windows shell scripts: CRLF (PowerShell conventions)
-*.ps1     text eol=crlf
-*.bat     text eol=crlf
+# Windows shell scripts: LF as well -- the project standardised on LF (the
+# settings app never preserves CRLF), so no CRLF exception is kept.
+*.ps1     text eol=lf
+*.bat     text eol=lf
 
 # Binary assets
 *.ico     binary

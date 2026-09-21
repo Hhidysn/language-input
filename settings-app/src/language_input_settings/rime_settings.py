@@ -17,10 +17,16 @@ This module implements the three pages that used to be placeholders:
 
 Writing rules (design doc §5.6): UTF-8 **without BOM**, LF newlines, atomic
 (temp + ``os.replace``), back up first.  Rime's own exported configuration is
-never round-trip-rewritten; ``weasel.custom.yaml`` is edited surgically line by
-line (``user.yaml`` via :mod:`yaml_io`; ``<schema>.custom.yaml`` are app-owned
-patch files, edited with a round-trip ruamel document like
-:mod:`schema_patch`).
+never round-trip-rewritten; the app-owned patch files ``weasel.custom.yaml``
+and ``<schema>.custom.yaml`` are edited with a round-trip ruamel document
+(like :mod:`schema_patch`), so nested and flat ``patch:`` spellings are both
+resolved for reads and writes.  ``user.yaml`` is edited surgically (line-based)
+via :mod:`yaml_io`.
+
+Live config writes (``user.yaml``) go through
+:func:`server.server_stopped`: the server holds ``user.yaml`` with
+``auto_save`` and rewrites the whole file, so every switch edit is a
+stop → wait → atomic-write → restart transaction (design §5.6 / B2).
 
 ``/deploy`` returns exit code ``0`` even for invalid YAML: success is judged by
 an empty stderr **and** by re-reading the resulting state.
@@ -31,13 +37,13 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 import threading
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
 from . import deploy as _deploy
-from . import paths, yaml_io
+from . import paths, server as _server, winproc, yaml_io
 
 try:  # ruamel is a declared dependency, but keep import failures graceful.
     from ruamel.yaml import YAML as _YAML
@@ -133,8 +139,6 @@ _MISSING = object()
 # mutex; this only prevents *this* process from launching two at once).
 _DEPLOYER_LOCK = threading.Lock()
 
-_DETACHED_PROCESS = 0x00000008
-
 
 # --- path / yaml helpers ----------------------------------------------------
 
@@ -220,10 +224,6 @@ def _flatten(mapping: Any, prefix: str = "") -> dict[str, Any]:
         else:
             out[path] = value
     return out
-
-
-def _indent_of(line: str) -> int:
-    return len(line) - len(line.lstrip(" "))
 
 
 # --- shared deploy helper ---------------------------------------------------
@@ -356,106 +356,102 @@ def current_style(
     }
 
 
-# -- surgical weasel.custom.yaml editing -------------------------------------
+# -- weasel.custom.yaml editing ----------------------------------------------
+#
+# ``weasel.custom.yaml`` is a plain Rime ``patch:`` file.  A patch key may be
+# written either flat (``"style/font_point": 15``) or nested::
+#
+#     patch:
+#       style:
+#         font_point: 15
+#
+# librime treats the two spellings identically (``/`` is a path separator), so
+# both reads and writes must resolve the *flattened* path.  A ruamel
+# round-trip document is used (like :mod:`schema_patch`) so comments and the
+# unrelated structure survive.  This replaces the old flat-only line editor,
+# which appended a duplicate flat key for a nested file and silently did
+# nothing when asked to remove a nested key (S6).
 
-_RE_PATCH_TOP = re.compile(r"^patch:\s*(?:#.*)?$")
-_RE_PATCH_KEY = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<key>\"[^\"]+\"|'[^']+'|[^:#][^:]*?)[ \t]*:[ \t]*(?P<value>.*)$"
-)
 
-
-def _unquote(raw: str) -> str:
-    raw = raw.strip()
-    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
-        return raw[1:-1]
-    return raw
-
-
-def _render_scalar(value: Any) -> str | None:
-    if value is None:
+def _find_leaf(mapping: dict, parts: list[str]):
+    """Return ``(parent_mapping, leaf_key)`` for slash-path ``parts`` or ``None``."""
+    joined = "/".join(parts)
+    if joined in mapping and not isinstance(mapping[joined], dict):
+        return mapping, joined
+    if len(parts) == 1:
         return None
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return str(value)
-    text = str(value)
-    if re.fullmatch(r"[A-Za-z0-9_./\-]+", text):
-        return text
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    child = mapping.get(parts[0])
+    if isinstance(child, dict):
+        return _find_leaf(child, parts[1:])
+    return None
+
+
+def _prune_empty_maps(mapping: dict) -> None:
+    """Recursively drop nested mappings that became empty (keeps the root)."""
+    for key in list(mapping.keys()):
+        value = mapping[key]
+        if isinstance(value, dict):
+            _prune_empty_maps(value)
+            if not value:
+                del mapping[key]
 
 
 def _edit_weasel_patch(text: str, changes: dict[str, Any]) -> str:
-    """Return ``text`` with ``changes`` merged into the top-level ``patch:``.
+    """Return ``text`` with ``changes`` merged into the ``patch:`` mapping.
 
-    ``None`` values remove an existing key.  Only the affected lines are
-    touched, so an add-then-remove round trip restores the file byte-for-byte.
+    ``changes`` keys are slash paths (``style/font_point``); they are resolved
+    against the flattened patch, so the flat and nested spellings are
+    equivalent.  A ``None`` value removes the key (and prunes a parent mapping
+    that becomes empty).  A ruamel round-trip document preserves comments and
+    the rest of the file.
     """
-    lines = text.split("\n")
-    trailing: str | None = None
-    if lines and lines[-1] == "":
-        trailing = ""
-        lines.pop()
-
-    patch_index: int | None = None
-    for index, line in enumerate(lines):
-        if _RE_PATCH_TOP.match(line):
-            patch_index = index
-            break
-
-    if patch_index is None:
-        new_lines = list(lines)
-        new_lines.append("patch:")
-        for key, value in changes.items():
-            if value is None:
-                continue
-            new_lines.append(f'  "{key}": {_render_scalar(value)}')
-        result = "\n".join(new_lines)
-        return result + "\n" if trailing is not None else result
-
-    patch_indent = _indent_of(lines[patch_index])
-    end = patch_index + 1
-    while end < len(lines):
-        stripped = lines[end].strip()
-        if stripped == "":
-            end += 1
-            continue
-        if _indent_of(lines[end]) <= patch_indent:
-            break
-        end += 1
-
-    block = lines[patch_index + 1 : end]
-    rest = lines[end:]
-    out_block: list[str] = []
-    seen: set[str] = set()
-
-    for line in block:
-        match = _RE_PATCH_KEY.match(line)
-        if match and _indent_of(line) > patch_indent:
-            key = _unquote(match.group("key"))
-            if key in changes:
-                seen.add(key)
-                value = changes[key]
-                if value is None:
-                    continue
-                indent = match.group("indent")
-                raw_key = match.group("key")
-                value_part = match.group("value")
-                comment = ""
-                if "#" in value_part:
-                    comment = " " + value_part[value_part.index("#") :].strip()
-                out_block.append(f"{indent}{raw_key}: {_render_scalar(value)}{comment}")
-                continue
-        out_block.append(line)
+    yaml = _require_yaml()()
+    yaml.preserve_quotes = True
+    yaml.allow_unicode = True
+    yaml.default_flow_style = False
+    yaml.indent(mapping=2, sequence=4, offset=2)
+    try:
+        document = yaml.load(text) if text.strip() else None
+    except Exception as exc:  # noqa: BLE001 - malformed user file
+        raise RimeSettingsError(f"cannot parse weasel.custom.yaml: {exc}") from exc
+    map_class = _require_map()
+    if document is None:
+        document = map_class()
+    if not isinstance(document, dict):
+        raise RimeSettingsError("weasel.custom.yaml is not a YAML mapping")
+    patch = document.get("patch")
+    if not isinstance(patch, dict):
+        patch = map_class()
+        document["patch"] = patch
 
     for key, value in changes.items():
-        if key in seen or value is None:
+        parts = [part for part in str(key).split("/") if part]
+        if not parts:
             continue
-        key_repr = key if re.fullmatch(r"[A-Za-z0-9_.\-]+", key) else f'"{key}"'
-        out_block.append(f"{' ' * (patch_indent + 2)}{key_repr}: {_render_scalar(value)}")
+        found = _find_leaf(patch, parts)
+        if value is None:
+            if found is not None:
+                parent, leaf = found
+                del parent[leaf]
+                _prune_empty_maps(patch)
+            continue
+        if found is not None:
+            parent, leaf = found
+            parent[leaf] = value
+            continue
+        # Create the nested mapping chain for a key that does not exist yet.
+        target = patch
+        for part in parts[:-1]:
+            child = target.get(part)
+            if not isinstance(child, dict):
+                child = map_class()
+                target[part] = child
+            target = child
+        target[parts[-1]] = value
 
-    lines = lines[: patch_index + 1] + out_block + rest
-    result = "\n".join(lines)
-    return result + "\n" if trailing is not None else result
+    buffer = StringIO()
+    yaml.dump(document, buffer)
+    return buffer.getvalue()
 
 
 def _normalize_style_key(key: str) -> str:
@@ -646,6 +642,11 @@ def set_switches(
 
     The three language options are mutually exclusive: turning any one on
     clears the other two.
+
+    The ``user.yaml`` write is a full stop → wait → atomic-write → restart
+    transaction (:func:`server.server_stopped`), because the running server
+    holds ``user.yaml`` with ``auto_save`` and rewrites the whole file.  A
+    no-op request (all saved values already match) does not touch the server.
     """
     path = _user_yaml_path(user_dir)
     normalized: dict[str, bool] = {}
@@ -658,21 +659,52 @@ def set_switches(
         for name in LANGUAGE_GROUP:
             normalized.setdefault(name, False)
 
-    changed_keys: list[str] = []
-    for name, value in normalized.items():
-        if yaml_io.set_user_yaml_option(path, name, value):
-            changed_keys.append(name)
+    # Only the options whose *saved* value actually differs need a write (this
+    # also avoids taking the stop/start transaction for a no-op).
+    saved = yaml_io.read_user_yaml_options(path)
+    pending = {
+        name: value
+        for name, value in normalized.items()
+        if saved.get(name) != value
+    }
 
     result: dict[str, Any] = {
         "action": "set_switches",
         "requested": normalized,
-        "changed": changed_keys,
+        "changed": [],
         "user_yaml": str(path),
         "options_after": read_switches(user_dir),
+        "server": None,
         "deploy": None,
         "clean": None,
     }
-    if deploy and changed_keys:
+    if not pending:
+        return result
+
+    # B2: WeaselServer holds user.yaml with auto_save and rewrites the whole
+    # file, so the write must happen with the server stopped (design §5.6).
+    # ``server_stopped`` holds the exclusive mutex across the transaction and
+    # restarts the server with its previous environment afterwards.
+    with _server.server_stopped() as tx:
+        changed_keys: list[str] = []
+        for name, value in pending.items():
+            if yaml_io.set_user_yaml_option(path, name, value):
+                changed_keys.append(name)
+        result["changed"] = changed_keys
+
+    # ``server_stopped`` restarts the server on exit, so read its final state
+    # *after* the ``with`` block (the yielded dict is mutated by the restart).
+    result["server"] = {
+        "was_running": tx["was_running"],
+        "stopped": tx["stopped"],
+        "model_host_exited": tx["model_host_exited"],
+        "restarted": tx["started"],
+        "pids": tx["pids"],
+        "restart_error": tx["start_error"],
+    }
+
+    result["options_after"] = read_switches(user_dir)
+    if deploy and result["changed"]:
         result["deploy"] = _deploy_dict()
         result["clean"] = bool(result["deploy"]["clean"])
         result["options_after"] = read_switches(user_dir)
@@ -1062,6 +1094,7 @@ def sync_user_data(
                 errors="replace",
                 timeout=timeout,
                 cwd=str(Path(deployer).parent),
+                **winproc.no_window_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
             result["ran"] = True
@@ -1127,8 +1160,8 @@ def open_dict_manager(
         process = subprocess.Popen(
             [str(deployer), "/dict"],
             cwd=str(Path(deployer).parent),
-            creationflags=_DETACHED_PROCESS,
             close_fds=True,
+            **winproc.no_window_kwargs(detached=True),
         )
     except OSError as exc:
         result["note"] = f"无法启动词典管理：{exc}"

@@ -13,18 +13,26 @@
     2. The app-owned config ``%APPDATA%\LanguageInput\config.json`` (and any
        ``*.bak-*`` backups in that directory; the directory is removed when it
        becomes empty).
-    3. Every ``*.bak-*`` backup the app created under the Rime user directory
-       (e.g. ``user.yaml.bak-<stamp>`` and
-       ``lua\language_input\gloss_filter.lua.bak-<stamp>``).
-    4. The **plain-gloss shadow** (``<rime_user_dir>\lua\language_input\
+    3. The app-created ``<schema>.custom.yaml`` artifacts
+       (``language_input_flypy.custom.yaml`` / ``language_input_pinyin.custom.yaml``):
+       only the keys this app wrote are removed (``switches/@N/reset`` from
+       ``schema_patch.neutralize_resets`` and ``translator/enable_user_dict``
+       from ``rime_settings.set_learning``).  A file that is left without any
+       other content is deleted, so learning is not left disabled after
+       uninstall.
+    4. **Only** the ``*.bak-*`` backups the app actually created under the Rime
+       user directory -- i.e. backups of ``user.yaml``, ``weasel.custom.yaml``,
+       the two ``<schema>.custom.yaml`` files and the plain-gloss shadow.
+       User-owned ``*.bak-*`` files are deliberately left alone.
+    5. The **plain-gloss shadow** (``<rime_user_dir>\lua\language_input\
        gloss_filter.lua``) and, when it was present, runs
        ``WeaselDeployer.exe /deploy`` so the shipped badge is restored.
 
     Deliberately does NOT touch
     ---------------------------
     * Installed model packs (``<rime_user_dir>\language_input\models\``).
-      The recursive ``*.bak-*`` sweep skips that subtree explicitly.
     * The downloaded model cache ``ai_cache_v3.json`` (not owned by this app).
+    * User-owned ``*.bak-*`` backups (only the app's own backup names match).
     * The app's own program files.  Only ``-RemoveProgramFiles`` deletes the
       onedir bundle directory (default
       ``<settings-app>\dist\LanguageInputSettings``).
@@ -104,7 +112,16 @@ function Resolve-DeployerExe {
 
 $RimeDir = Resolve-RimeUserDir
 $ShadowPath = Join-Path $RimeDir 'lua\language_input\gloss_filter.lua'
-$ModelsDir = [System.IO.Path]::GetFullPath((Join-Path $RimeDir 'language_input\models'))
+# The app-owned <schema>.custom.yaml patch files (schema_patch / set_learning).
+$AppCustomYamls = @(
+    (Join-Path $RimeDir 'language_input_flypy.custom.yaml'),
+    (Join-Path $RimeDir 'language_input_pinyin.custom.yaml')
+)
+# Files the app backs up (only their ``.bak-*`` backups are swept).
+$AppBackupTargets = @(
+    (Join-Path $RimeDir 'user.yaml'),
+    (Join-Path $RimeDir 'weasel.custom.yaml')
+) + $AppCustomYamls + @($ShadowPath)
 $DeployerExe = Resolve-DeployerExe
 
 $Mode = if ($DryRun) { 'DRY-RUN (no changes)' } else { 'LIVE' }
@@ -129,6 +146,56 @@ function Invoke-RemoveFile {
     }
 }
 
+function Invoke-RevertAppCustomYaml {
+    # Remove ONLY the keys this app wrote into a <schema>.custom.yaml; delete
+    # the file when nothing else remains.  Never touches user-added keys.
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Write-Host "[skip]    app custom yaml not present : $Path"
+        return
+    }
+    $lines = [System.IO.File]::ReadAllLines($Path)
+    $kept = New-Object System.Collections.Generic.List[string]
+    $removed = 0
+    foreach ($line in $lines) {
+        if ($line -match '^\s*"?switches/@\d+/reset"?\s*:' -or
+            $line -match '^\s*"?translator/enable_user_dict"?\s*:') {
+            $removed++
+            continue
+        }
+        $kept.Add($line)
+    }
+    if ($removed -eq 0) {
+        Write-Host "[skip]    no app keys in              : $Path"
+        return
+    }
+    $meaningful = $false
+    foreach ($line in $kept) {
+        $trimmed = $line.Trim()
+        if ($trimmed -eq '' -or $trimmed.StartsWith('#')) { continue }
+        if ($trimmed -eq 'patch:' -or $trimmed -match '^patch:\s*\{\s*\}\s*$') { continue }
+        $meaningful = $true
+        break
+    }
+    if ($DryRun) {
+        Write-Host "[dry-run] would remove $removed app key(s) from : $Path"
+        if (-not $meaningful) {
+            Write-Host "[dry-run] would remove file           : $Path"
+        }
+        return
+    }
+    if ($meaningful) {
+        $text = ($kept -join "`n")
+        if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { $text += "`n" }
+        [System.IO.File]::WriteAllText($Path, $text, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "[reverted] app keys from              : $Path"
+    }
+    else {
+        Remove-Item -LiteralPath $Path -Force
+        Write-Host "[removed] file                       : $Path"
+    }
+}
+
 # --- 1. autostart entry -----------------------------------------------------
 $existing = Get-ItemProperty -Path $RunKey -Name $ValueName -ErrorAction SilentlyContinue
 if ($null -ne $existing) {
@@ -144,28 +211,36 @@ else {
     Write-Host "[skip]    autostart registry value not present"
 }
 
-# --- 2. app-owned config (+ its backups) ------------------------------------
+# --- 2. app-owned config ----------------------------------------------------
 Invoke-RemoveFile -Path $ConfigFile
 
-# --- 3. app-created *.bak-* backups -----------------------------------------
+# --- 3. app-created <schema>.custom.yaml artifacts --------------------------
+foreach ($customYaml in $AppCustomYamls) {
+    Invoke-RevertAppCustomYaml -Path $customYaml
+}
+
+# --- 4. app-created *.bak-* backups (scoped to the app's own files) ----------
 $backups = @()
 if (Test-Path -LiteralPath $ConfigDir -PathType Container) {
-    $backups += Get-ChildItem -LiteralPath $ConfigDir -File -Filter '*.bak-*' -ErrorAction SilentlyContinue
+    $backups += Get-ChildItem -LiteralPath $ConfigDir -File -Filter 'config.json.bak-*' -ErrorAction SilentlyContinue
 }
-if (Test-Path -LiteralPath $RimeDir -PathType Container) {
-    $backups += Get-ChildItem -LiteralPath $RimeDir -Recurse -File -Filter '*.bak-*' -ErrorAction SilentlyContinue |
-        Where-Object { -not $_.FullName.StartsWith($ModelsDir, [System.StringComparison]::OrdinalIgnoreCase) }
+foreach ($target in $AppBackupTargets) {
+    $dir = Split-Path -Parent $target
+    $leaf = Split-Path -Leaf $target
+    if (Test-Path -LiteralPath $dir -PathType Container) {
+        $backups += Get-ChildItem -LiteralPath $dir -File -Filter "$leaf.bak-*" -ErrorAction SilentlyContinue
+    }
 }
 $backups = $backups | Where-Object { $_ } | Sort-Object FullName -Unique
 
 if (@($backups).Count -eq 0) {
-    Write-Host "[skip]    no *.bak-* backups found"
+    Write-Host "[skip]    no app *.bak-* backups found"
 }
 foreach ($backup in @($backups)) {
     Invoke-RemoveFile -Path $backup.FullName
 }
 
-# --- 4. plain-gloss shadow + redeploy ---------------------------------------
+# --- 5. plain-gloss shadow + redeploy ---------------------------------------
 $shadowPresent = Test-Path -LiteralPath $ShadowPath -PathType Leaf
 if ($shadowPresent) {
     if ($DryRun) {
@@ -190,7 +265,7 @@ else {
     Write-Host "[skip]    plain-gloss shadow not present (badge already reverted)"
 }
 
-# --- 5. empty config directory ----------------------------------------------
+# --- 6. empty config directory ----------------------------------------------
 if (-not $DryRun -and (Test-Path -LiteralPath $ConfigDir -PathType Container)) {
     if (-not (Get-ChildItem -LiteralPath $ConfigDir -Force -ErrorAction SilentlyContinue)) {
         Remove-Item -LiteralPath $ConfigDir -Force
@@ -198,7 +273,7 @@ if (-not $DryRun -and (Test-Path -LiteralPath $ConfigDir -PathType Container)) {
     }
 }
 
-# --- 6. optional program files ----------------------------------------------
+# --- 7. optional program files ----------------------------------------------
 if ($RemoveProgramFiles) {
     $safeRoot = [System.IO.Path]::GetPathRoot($InstallDir)
     if ($InstallDir -eq $safeRoot -or $InstallDir.Length -le 3) {

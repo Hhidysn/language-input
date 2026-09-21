@@ -25,12 +25,12 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
-from . import paths
+from . import paths, server as _server, winproc
 from .models_catalog import (
     INSTALL_FORMAT,
     M2M100_INSTALL_FORMAT,
@@ -218,6 +218,12 @@ def verify_installed_component(component_root: Path | str) -> dict:
     if root.is_symlink() or not root.is_dir():
         result["errors"].append("component root is not a real directory")
         return result
+    # Resolve the root to an absolute path before comparing it against the
+    # resolved (absolute) member paths; a relative ``--model-root`` otherwise
+    # makes every file look like it "escaped its component root" (S8).
+    root = root.resolve()
+    result["root"] = str(root)
+    result["component_id"] = root.name
     try:
         record = json.loads((root / "installed.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -357,6 +363,40 @@ def recover_interrupted(model_root: Path | str, *, exclude=()) -> dict:
 
 # --- install ----------------------------------------------------------------
 
+@contextmanager
+def _install_transaction(
+    model_root: Path | str,
+    *,
+    check_running: bool = True,
+    wait_timeout: float = 30.0,
+):
+    """Yield inside a TSF-suppression + server-stopped install transaction.
+
+    With ``check_running`` true this stops ``WeaselServer.exe`` (and waits for
+    its ``LanguageInputModelHost.exe`` child) and holds
+    ``WeaselDeployerExclusiveMutex`` for the whole transaction, so the TSF
+    cannot re-run ``start_service.bat`` and respawn the server between the
+    backup and the swap renames (B3).  The server is restarted afterwards if it
+    had been running.  ``check_running=False`` is for tests: only the mutex is
+    held.
+    """
+    if check_running:
+        with _server.server_stopped(stop_timeout=wait_timeout) as tx:
+            # Final check after the stop (design §7.3 / V12).
+            assert_host_stopped(model_root, timeout=wait_timeout)
+            yield tx
+        return
+    with _server.maintenance_guard():
+        yield {
+            "was_running": False,
+            "stopped": False,
+            "model_host_exited": False,
+            "started": False,
+            "pids": [],
+            "start_error": None,
+        }
+
+
 def install_from_sources(
     component: ModelComponent,
     staging_dir: Path | str,
@@ -369,7 +409,9 @@ def install_from_sources(
     """Swap a synthesized ``staging_dir`` into ``model_root``.
 
     Mirrors the host's ``install_pack``.  ``staging_dir`` and ``model_root``
-    must be on the same volume (both renames are ``os.replace``).
+    must be on the same volume (both renames are ``os.replace``).  The whole
+    backup/swap/rollback runs with the server and host stopped, under
+    ``WeaselDeployerExclusiveMutex`` (:func:`_install_transaction`).
     """
     root = Path(model_root)
     root.mkdir(parents=True, exist_ok=True)
@@ -377,11 +419,6 @@ def install_from_sources(
         raise SynthesisError("model root must be a real directory")
 
     staging = Path(staging_dir)
-    # Clean leftovers, but never the staging directory we are about to install.
-    recovered = recover_interrupted(root, exclude=[staging])
-    if check_running:
-        assert_host_stopped(root, timeout=wait_timeout)
-
     verification = verify_installed_component(staging)
     if not verification["ok"]:
         raise SynthesisError(
@@ -391,26 +428,35 @@ def install_from_sources(
     if verification["component_id"] != component.component_id:
         raise SynthesisError("staging component_id does not match the requested component")
 
-    present = installed_components(root)
-    missing = [dep for dep in component.requires if dep not in present]
-    if missing:
-        raise ValueError("missing required component(s): " + ", ".join(missing))
+    with _install_transaction(
+        root, check_running=check_running, wait_timeout=wait_timeout
+    ) as tx:
+        # Clean leftovers, but never the staging directory we are about to
+        # install.  This mutates the model root, so it is inside the guard.
+        recovered = recover_interrupted(root, exclude=[staging])
 
-    target = root / component.component_id
-    if target.exists() and not replace:
-        raise FileExistsError(f"component is already installed: {component.component_id}")
+        present = installed_components(root)
+        missing = [dep for dep in component.requires if dep not in present]
+        if missing:
+            raise ValueError("missing required component(s): " + ", ".join(missing))
 
-    backup = root / f"{_BACKUP_PREFIX}{component.component_id}-{uuid.uuid4().hex}"
-    if target.exists():
-        os.replace(target, backup)
-    try:
-        os.replace(staging, target)
-    except Exception:
-        if backup.exists() and not target.exists():
-            os.replace(backup, target)
-        raise
-    if backup.exists():
-        shutil.rmtree(backup)
+        target = root / component.component_id
+        if target.exists() and not replace:
+            raise FileExistsError(
+                f"component is already installed: {component.component_id}"
+            )
+
+        backup = root / f"{_BACKUP_PREFIX}{component.component_id}-{uuid.uuid4().hex}"
+        if target.exists():
+            os.replace(target, backup)
+        try:
+            os.replace(staging, target)
+        except Exception:
+            if backup.exists() and not target.exists():
+                os.replace(backup, target)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
 
     record = json.loads((target / "installed.json").read_text(encoding="utf-8"))
     return {
@@ -418,6 +464,13 @@ def install_from_sources(
         "target": str(target),
         "recovered": recovered,
         "verification": verification,
+        "server": {
+            "was_running": tx["was_running"],
+            "stopped": tx["stopped"],
+            "restarted": tx["started"],
+            "pids": tx["pids"],
+            "restart_error": tx["start_error"],
+        },
     }
 
 
@@ -449,13 +502,16 @@ def install_from_limodel(
     *,
     replace: bool = False,
     m2m100: bool = False,
+    check_running: bool = True,
+    wait_timeout: float = 30.0,
 ) -> dict:
     """Import an exact catalog ``.limodel`` via the frozen host.
 
     The pack is first checked against the shipped catalog (size + SHA-256).
     If it does not match exactly, this raises and points at
     :func:`install_from_sources` (user-made packs are rejected by the host's
-    ``audit_pack``).
+    ``audit_pack``).  The host's own backup/swap/rollback runs with the server
+    and host stopped, under ``WeaselDeployerExclusiveMutex`` (B3).
     """
     pack = Path(pack_path)
     if not pack.is_file():
@@ -465,6 +521,13 @@ def install_from_limodel(
 
     install_root = paths.weasel_root()
     quickmt_catalog = paths.packs_catalog(install_root)
+    # The host is always invoked with ``--catalog <quickmt catalog>``, so that
+    # path must exist even for an M2M100 import; never pass the string "None"
+    # (N2).
+    if quickmt_catalog is None or not quickmt_catalog.is_file():
+        raise FileNotFoundError(
+            "QuickMT catalog not found (required as the host's --catalog)"
+        )
     catalog = paths.m2m100_catalog(install_root) if m2m100 else quickmt_catalog
     if catalog is None or not catalog.is_file():
         raise FileNotFoundError(
@@ -498,8 +561,6 @@ def install_from_limodel(
     if component.get("id") in present and not replace:
         raise FileExistsError(f"component is already installed: {component.get('id')}")
 
-    assert_host_stopped(root)
-
     host = paths.find_model_host_exe(install_root) or paths.model_host_exe(install_root)
     if host is None or not host.is_file():
         raise FileNotFoundError("LanguageInputModelHost.exe was not found")
@@ -518,17 +579,21 @@ def install_from_limodel(
     if replace:
         command.append("--replace")
 
-    try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=600,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise SynthesisError(f"host import timed out after 600s: {exc}") from exc
+    with _install_transaction(
+        root, check_running=check_running, wait_timeout=wait_timeout
+    ) as tx:
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=600,
+                **winproc.no_window_kwargs(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SynthesisError(f"host import timed out after 600s: {exc}") from exc
 
     stdout = completed.stdout or ""
     stderr = completed.stderr or ""
@@ -550,24 +615,25 @@ def install_from_limodel(
         "record": record,
         "stdout": stdout,
         "stderr": stderr,
+        "server": {
+            "was_running": tx["was_running"],
+            "stopped": tx["stopped"],
+            "restarted": tx["started"],
+            "pids": tx["pids"],
+            "restart_error": tx["start_error"],
+        },
     }
 
 
 # --- process guards ---------------------------------------------------------
 
 def _process_running(name: str) -> bool:
-    if sys.platform != "win32":
-        return False
-    try:
-        completed = subprocess.run(
-            ["tasklist", "/FI", f"IMAGENAME eq {name}", "/NH"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return name.lower() in (completed.stdout or "").lower()
+    """True when a process image ``name`` is running (never spawns a child).
+
+    Backed by a ctypes ``EnumProcesses`` walk (:mod:`winproc`), so the old
+    ``tasklist`` console flash is gone; the meaning is unchanged.
+    """
+    return winproc.is_process_running(name)
 
 
 def running_processes() -> list[str]:

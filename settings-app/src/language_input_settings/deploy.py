@@ -20,6 +20,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import winproc
+
 __all__ = ["DeployResult", "run_deploy", "is_deployer_running"]
 
 _MUTEX_NAME = "WeaselDeployerMutex"
@@ -93,6 +95,7 @@ def run_deploy(deployer_exe: Path | str | None, timeout: float = 120.0) -> Deplo
             errors="replace",
             timeout=timeout,
             cwd=str(exe.parent),
+            **winproc.no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         return DeployResult(

@@ -22,7 +22,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import env_config, paths
+from . import env_config, paths, winproc
 
 __all__ = [
     "ServerError",
@@ -33,6 +33,7 @@ __all__ = [
     "restart",
     "wait_for_model_host_exit",
     "maintenance_guard",
+    "server_stopped",
     "read_process_env",
     "read_server_env",
     "apply_backend",
@@ -41,8 +42,6 @@ __all__ = [
 _SERVER_EXE = "WeaselServer.exe"
 _HOST_EXE = "LanguageInputModelHost.exe"
 _EXCLUSIVE_MUTEX = "WeaselDeployerExclusiveMutex"
-
-_DETACHED_PROCESS = 0x00000008
 
 # Process-env reading (PROCESS_BASIC_INFORMATION etc.) is 64-bit Windows only;
 # the whole app targets Windows 10/11 x64 (design §0).
@@ -78,30 +77,13 @@ def _require_server_exe() -> Path:
 # --- process listing --------------------------------------------------------
 
 def _pids(image: str) -> list[int]:
-    """Return running PIDs for ``image`` using ``tasklist`` (never raises)."""
-    if sys.platform != "win32":
-        return []
-    try:
-        completed = subprocess.run(
-            ["tasklist", "/FI", f"IMAGENAME eq {image}", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return []
-    found: list[int] = []
-    for line in (completed.stdout or "").splitlines():
-        line = line.strip()
-        if not line or line.lower().startswith('"info'):
-            continue
-        parts = [part.strip('"') for part in line.split('","')]
-        if parts and parts[0].lower() == image.lower():
-            try:
-                found.append(int(parts[1]))
-            except (IndexError, ValueError):
-                continue
-    return found
+    """Return running PIDs for ``image`` (never raises, never spawns a child).
+
+    Uses ``kernel32.EnumProcesses`` /
+    ``QueryFullProcessImageNameW`` via :mod:`winproc`; the old ``tasklist``
+    probe flashed a console window on every call from the windowed bundle.
+    """
+    return winproc.list_process_ids(image)
 
 
 def running_pids() -> list[int]:
@@ -150,7 +132,7 @@ def stop(timeout: float = 20.0, *, poll: float = 0.2) -> bool:
         subprocess.Popen(
             [str(exe), "/q"],
             cwd=str(exe.parent),
-            creationflags=_DETACHED_PROCESS,
+            **winproc.no_window_kwargs(detached=True),
         )
     except OSError as exc:
         raise ServerError(f"failed to launch WeaselServer.exe /q: {exc}") from exc
@@ -184,7 +166,7 @@ def start(
             [str(exe)],
             env=dict(env),
             cwd=str(exe.parent),
-            creationflags=_DETACHED_PROCESS,
+            **winproc.no_window_kwargs(detached=True),
         )
     except OSError as exc:
         raise ServerError(f"failed to launch WeaselServer.exe: {exc}") from exc
@@ -220,7 +202,12 @@ def maintenance_guard(name: str = _EXCLUSIVE_MUTEX):
     The TSF re-runs ``start_service.bat`` after a failed reconnect *unless*
     this mutex already exists (``WeaselTSF.cpp:242-258``).  Holding it for the
     whole stop/write/install window suppresses that auto-recovery (design §5.2
-    / V11).  On non-Windows this is a no-op.
+    / V11).  On non-Windows this is a no-op that yields ``False``.
+
+    On Windows a failure to acquire the mutex is **fatal**: running a
+    transaction without TSF suppression would silently risk a stale server
+    respawning mid-write, so this raises :class:`ServerError` instead of
+    yielding ``False`` for the caller to ignore.
     """
     if sys.platform != "win32":
         yield False
@@ -234,13 +221,90 @@ def maintenance_guard(name: str = _EXCLUSIVE_MUTEX):
     close_handle.argtypes = [wt.HANDLE]
     close_handle.restype = wt.BOOL
 
+    ctypes.set_last_error(0)
     handle = create_mutex(None, False, name)
-    acquired = bool(handle)
+    if not handle:
+        raise ServerError(
+            f"failed to acquire {name} (CreateMutexW error "
+            f"{ctypes.get_last_error()}); refusing to run a maintenance "
+            "transaction without TSF auto-recovery suppression"
+        )
     try:
-        yield acquired
+        yield True
     finally:
-        if handle:
-            close_handle(handle)
+        close_handle(handle)
+
+
+@contextmanager
+def server_stopped(
+    *,
+    stop_timeout: float = 20.0,
+    start_timeout: float = 15.0,
+    start_env: dict[str, str] | None = None,
+    restart: bool = True,
+    wait_for_host: bool = True,
+):
+    """Exclusive-mutex + stop ``WeaselServer.exe`` transaction (design §5.6).
+
+    Holds ``WeaselDeployerExclusiveMutex``, records whether the server was
+    running (and its environment), stops it and waits for the model host, then
+    yields a mutable ``state`` dict::
+
+        {
+            "was_running": bool,
+            "env": dict | None,      # captured before the stop
+            "stopped": bool,
+            "model_host_exited": bool,
+            "started": bool,
+            "pids": list[int],
+            "start_error": str | None,
+        }
+
+    On exit the server is restarted (only when it had been running and
+    ``restart`` is true) with ``start_env`` or, when that is ``None``, the
+    environment captured before the stop.  A failed stop raises
+    :class:`ServerError`; a failed restart is recorded in
+    ``state["start_error"]`` rather than raised, so the caller can surface it.
+    """
+    with maintenance_guard():
+        was_running = is_running()
+        captured = read_server_env() if was_running else None
+        state: dict = {
+            "was_running": was_running,
+            "env": captured,
+            "stopped": False,
+            "model_host_exited": False,
+            "started": False,
+            "pids": [],
+            "start_error": None,
+        }
+        if was_running and not stop(timeout=stop_timeout):
+            raise ServerError(
+                f"WeaselServer.exe did not exit within {stop_timeout:g}s; "
+                "refusing to proceed with a live server"
+            )
+        state["stopped"] = True
+        if wait_for_host:
+            state["model_host_exited"] = wait_for_model_host_exit(stop_timeout)
+        try:
+            yield state
+        finally:
+            if was_running and restart:
+                env = (
+                    start_env
+                    if start_env is not None
+                    else (captured if captured is not None else dict(os.environ))
+                )
+                try:
+                    started = start(env, wait=True, timeout=start_timeout)
+                    state["pids"] = started.get("pids", []) or running_pids()
+                    state["started"] = bool(state["pids"])
+                    if not state["started"]:
+                        state["start_error"] = (
+                            "WeaselServer.exe did not appear after restart"
+                        )
+                except Exception as exc:  # noqa: BLE001 - reported, not raised
+                    state["start_error"] = f"{type(exc).__name__}: {exc}"
 
 
 # --- reading a live process environment block -------------------------------
@@ -439,11 +503,12 @@ def apply_backend(
     new_env = env_config.build_server_env(
         base, selected, url=url, api_key=api_key, model=model, language=language
     )
-    expected = {
-        name: new_env.get(name)
-        for name in env_config.REMOTE_VARS
-        if name in new_env
-    }
+    # Build ``expected`` from *every* remote variable, not only the ones present
+    # in ``new_env``: a missing key is an expectation too ("must be absent").
+    # For the default ``local`` backend ``build_server_env`` deletes all of
+    # them, so the old "only present keys" dict was empty and the verification
+    # trivially matched even a stale remote server (B1).
+    expected = {name: new_env.get(name) for name in env_config.REMOTE_VARS}
 
     before_running = is_running()
     before_env = read_server_env() if before_running else None
@@ -499,10 +564,13 @@ def apply_backend(
                 )
 
             started = start(new_env, wait=True, timeout=start_timeout)
-            result["started"] = True
-            result["pids"] = started.get("pids", [])
-            if not result["pids"]:
-                result["pids"] = running_pids()
+            result["pids"] = started.get("pids", []) or running_pids()
+            result["started"] = bool(result["pids"])
+            if not result["started"]:
+                result["errors"].append(
+                    "WeaselServer.exe did not appear after start (no PID found); "
+                    "cannot verify the injected environment"
+                )
 
             observed, verified = _verify_env(expected, timeout=verify_timeout)
             result["observed"] = observed
@@ -519,7 +587,9 @@ def apply_backend(
         result["errors"].append(f"{type(exc).__name__}: {exc}")
         return result
 
-    result["ok"] = not result["errors"] and result["env_verified"]
+    result["ok"] = bool(
+        not result["errors"] and result["env_verified"] and result["started"]
+    )
     return result
 
 
@@ -538,18 +608,26 @@ def _expected_matches(observed: dict[str, str], expected: dict[str, str | None])
 def _verify_env(
     expected: dict[str, str | None], *, timeout: float
 ) -> tuple[dict[str, str], bool]:
-    """Poll the running server's env until it matches ``expected``."""
+    """Poll the running server's env until it matches ``expected``.
+
+    ``expected`` carries ``None`` for every remote variable that must be
+    *absent* (the ``local`` backend).  A read failure (``read_server_env()``
+    returns ``None`` -- no server, or the env block is unreadable) is **not** a
+    match: an unreadable environment can never prove the injected env arrived.
+    """
     deadline = time.monotonic() + timeout
     observed: dict[str, str] = {}
+    remote_upper = {name.upper() for name in env_config.REMOTE_VARS}
     while True:
-        env = read_server_env() or {}
-        observed = {
-            key: value
-            for key, value in env.items()
-            if key.upper() in {name.upper() for name in env_config.REMOTE_VARS}
-        }
-        if _expected_matches(observed, expected):
-            return observed, True
+        env = read_server_env()
+        if env is not None:
+            observed = {
+                key: value
+                for key, value in env.items()
+                if key.upper() in remote_upper
+            }
+            if _expected_matches(observed, expected):
+                return observed, True
         if time.monotonic() >= deadline:
             return observed, False
         time.sleep(0.25)

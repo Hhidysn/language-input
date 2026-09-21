@@ -11,6 +11,9 @@ Entry point (:func:`main`) supports:
 * ``--gui-shot <out_dir>``: build the window, show it, and save one PNG per page
   (``01-overview.png`` … ``07-about.png``) with ``QWidget.grab()``; then exit.
 * ``--version``: print the app version.
+* ``--start-minimized``: start hidden in the system tray (no window).  The
+  persisted ``config.start_minimized`` setting is honoured too, so the
+  autostart entry can pass the flag.
 * no arguments: launch the PySide6 tray application.
 
 GUI stack is **PySide6 (Qt for Python)** (design doc §6 / decision #13): the
@@ -2427,8 +2430,12 @@ if _HAS_QT:
                 state, text = "error", "部署超时，配置状态未知。"
             elif result.busy:
                 state, text = "warning", "已有另一个部署器在运行，请稍后重试。"
-            elif result.exit_code == 0:
+            elif result.exit_code == 0 and not (result.stderr or "").strip():
                 state, text = "success", "部署完成。"
+            elif result.exit_code == 0:
+                # `/deploy` returns 0 even for invalid YAML: a non-empty stderr
+                # means the configuration was NOT deployed cleanly (S3).
+                state, text = "error", "部署退出码为 0，但错误输出（stderr）非空。"
             else:
                 state, text = "error", f"部署退出码 {result.exit_code}。"
             _update_strip(self.strip, state, text)
@@ -2602,9 +2609,10 @@ if _HAS_QT:
             self.window.raise_()
             self.window.activateWindow()
 
-        def start(self) -> None:
+        def start(self, *, minimized: bool = False) -> None:
             self.tray.show()
-            self.show_window()
+            if not minimized:
+                self.show_window()
 
         def quit(self) -> None:
             try:
@@ -2625,7 +2633,7 @@ if _HAS_QT:
             self._app.processEvents()
 
 
-def run_gui() -> int:
+def run_gui(*, start_minimized: bool = False) -> int:
     if not _HAS_QT:
         print(
             f"error: PySide6 is required for the GUI ({_QT_IMPORT_ERROR}). "
@@ -2643,8 +2651,17 @@ def run_gui() -> int:
     app.setQuitOnLastWindowClosed(False)
     _apply_theme(app)
 
+    # Honour both the explicit ``--start-minimized`` flag (used by the
+    # autostart entry) and the persisted ``config.start_minimized`` setting.
+    minimize_on_start = start_minimized
+    if not minimize_on_start:
+        try:
+            minimize_on_start = bool(appconfig.load_config().start_minimized)
+        except Exception:  # pragma: no cover - defensive
+            minimize_on_start = False
+
     controller = SettingsApp(app)
-    controller.start()
+    controller.start(minimized=minimize_on_start)
     return app.exec()
 
 
@@ -2795,6 +2812,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print the application version and exit",
     )
+    parser.add_argument(
+        "--start-minimized",
+        action="store_true",
+        help="start hidden in the system tray (used by the autostart entry)",
+    )
 
     # Model management (M3).  Imported lazily so --selftest stays independent.
     from . import cli as _cli
@@ -2817,7 +2839,7 @@ def main(argv: list[str] | None = None) -> int:
     if handled is not None:
         return handled
 
-    return run_gui()
+    return run_gui(start_minimized=bool(args.start_minimized))
 
 
 if __name__ == "__main__":  # pragma: no cover

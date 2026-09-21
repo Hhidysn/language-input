@@ -530,7 +530,10 @@ def cmd_set_style(args) -> int:
         patch[key.strip()] = None if raw == "" else raw
     result = rime_settings.apply_style(patch)
     _print(result)
-    return 0 if result.get("changes") is not None else 1
+    if not result.get("changed"):
+        return 0
+    # A change that could not be deployed cleanly is a failure (N1).
+    return 0 if result.get("clean") else 1
 
 
 def cmd_switches_status(args) -> int:

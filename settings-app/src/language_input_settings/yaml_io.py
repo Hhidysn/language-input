@@ -302,17 +302,19 @@ def set_user_yaml_option(
 ) -> bool:
     """Surgically set ``var/option/<name>`` in ``user.yaml``.
 
-    Backs the file up first, then rewrites only the affected lines.  Returns
-    ``True`` if the file changed.  Writing is atomic (UTF-8 no BOM, LF).
+    Checks whether anything would change **first**, then backs the file up and
+    rewrites only the affected lines.  Returns ``True`` if the file changed.
+    Writing is atomic (UTF-8 no BOM, LF).  The no-op check avoids accumulating
+    backups on repeated applies of an unchanged value (N4).
     """
     target = Path(path)
-    backup_file(target)
     original = read_yaml_text(target)
     updated = _upsert_var_option(original, name, bool(value))
-    if updated != original:
-        atomic_write_text(target, updated)
-        return True
-    return False
+    if updated == original:
+        return False
+    backup_file(target)
+    atomic_write_text(target, updated)
+    return True
 
 
 def read_user_yaml_options(path: str | os.PathLike[str]) -> dict[str, bool]:
