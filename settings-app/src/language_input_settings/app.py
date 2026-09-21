@@ -670,10 +670,15 @@ if _HAS_QT:
     # --- icons (drawn with QPainter) ---------------------------------------
 
     def _make_nav_icon(kind: str, color: str) -> "QPixmap":
-        pixmap = QPixmap(16, 16)
+        # Render at 2x physical resolution and tag the pixmap with a device
+        # pixel ratio of 2.0, so the icon stays crisp on Windows 125%–200%
+        # scaling while its logical size remains 16x16.
+        scale = 2
+        pixmap = QPixmap(16 * scale, 16 * scale)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.scale(scale, scale)
         pen = QPen(QColor(color))
         pen.setWidthF(1.4)
         pen.setJoinStyle(Qt.RoundJoin)
@@ -742,6 +747,7 @@ if _HAS_QT:
             painter.drawLine(QPointF(8, 7), QPointF(8, 11))
 
         painter.end()
+        pixmap.setDevicePixelRatio(float(scale))
         return pixmap
 
     def _nav_icon(kind: str) -> "QIcon":
@@ -794,7 +800,7 @@ if _HAS_QT:
             grid = QGridLayout()
             grid.setColumnStretch(1, 1)
             grid.setHorizontalSpacing(12)
-            grid.setVerticalSpacing(6)
+            grid.setVerticalSpacing(8)
             for row, (key, value) in enumerate(_overview_rows(resolved)):
                 key_label = QLabel(key)
                 key_label.setObjectName("DetailLabel")
@@ -1117,11 +1123,9 @@ if _HAS_QT:
 
         Applying a backend is a real ``WeaselServer`` stop/start transaction
         (env is read once at process start), so nothing happens until the user
-        confirms.  The page also exposes the schema ``reset`` neutralization
-        (design §5.5 / R19) with a live read-back of the compiled schema.
+        confirms.
         """
 
-        _SCHEMAS = ("language_input_flypy", "language_input_pinyin")
         _BACKENDS = (
             ("local", "本地模型"),
             ("remote", "外接 API"),
@@ -1143,8 +1147,8 @@ if _HAS_QT:
             segmented.setObjectName("Segmented")
             segmented.setAttribute(Qt.WA_StyledBackground, True)
             segmented_layout = QHBoxLayout(segmented)
-            segmented_layout.setContentsMargins(2, 2, 2, 2)
-            segmented_layout.setSpacing(2)
+            segmented_layout.setContentsMargins(4, 4, 4, 4)
+            segmented_layout.setSpacing(4)
             self._backend_buttons = QButtonGroup(self)
             self._backend_buttons.setExclusive(True)
             for value, label in self._BACKENDS:
@@ -1196,20 +1200,22 @@ if _HAS_QT:
             form.addRow("模型", self.model_edit)
             form.addRow("目标语言", self.language_combo)
             form_card.body.addLayout(form)
+            layout.addWidget(form_card)
 
+            # -- page-level primary action (kept outside the API card so it is
+            #    always enabled and clearly applies the whole page) --
             actions = QHBoxLayout()
             actions.addStretch(1)
             self.apply_button = QPushButton("应用")
             self.apply_button.setObjectName("PrimaryButton")
             self.apply_button.clicked.connect(self._on_apply)
             actions.addWidget(self.apply_button)
-            form_card.body.addLayout(actions)
+            layout.addLayout(actions)
 
             self.apply_strip = QLabel("")
             self.apply_strip.setObjectName("StatusStrip")
             self.apply_strip.setWordWrap(True)
-            form_card.body.addWidget(self.apply_strip)
-            layout.addWidget(form_card)
+            layout.addWidget(self.apply_strip)
 
             # -- advanced (collapsed): badge + schema reset --
             advanced = CollapsibleSection("高级")
@@ -1233,50 +1239,6 @@ if _HAS_QT:
             self.badge_refresh_button = QPushButton("刷新译注状态")
             self.badge_refresh_button.clicked.connect(self._refresh_plain_badge)
             advanced.addWidget(self.badge_refresh_button)
-
-            separator = QFrame()
-            separator.setObjectName("Separator")
-            separator.setFrameShape(QFrame.HLine)
-            advanced.addWidget(separator)
-
-            reset_heading = QLabel("选项持久化")
-            reset_heading.setObjectName("SectionHeading")
-            advanced.addWidget(reset_heading)
-            advanced.addWidget(
-                _caption_label(
-                    "移除方案开关的显式重置值，使所选后端 / 语言在重开会话后"
-                    "仍能保持。"
-                )
-            )
-            reset_row = QHBoxLayout()
-            reset_row.setSpacing(8)
-            reset_row.addWidget(QLabel("方案"))
-            self.schema_combo = QComboBox()
-            for schema_id in self._SCHEMAS:
-                self.schema_combo.addItem(
-                    SCHEMA_LABELS.get(schema_id, schema_id), schema_id
-                )
-                self.schema_combo.setItemData(
-                    self.schema_combo.count() - 1, schema_id, Qt.ToolTipRole
-                )
-            self.schema_combo.currentIndexChanged.connect(self._refresh_reset)
-            reset_row.addWidget(self.schema_combo)
-            self.neutralize_button = QPushButton("使选项可保持")
-            self.neutralize_button.clicked.connect(self._on_neutralize)
-            reset_row.addWidget(self.neutralize_button)
-            reset_button = QPushButton("刷新")
-            reset_button.clicked.connect(self._refresh_reset)
-            reset_row.addWidget(reset_button)
-            reset_row.addStretch(1)
-            advanced.addLayout(reset_row)
-            self.reset_label = QLabel("")
-            self.reset_label.setWordWrap(True)
-            advanced.addWidget(self.reset_label)
-            self.reset_detail_label = QLabel("")
-            self.reset_detail_label.setObjectName("DetailValue")
-            self.reset_detail_label.setWordWrap(True)
-            self.reset_detail_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            advanced.addWidget(self.reset_detail_label)
             layout.addWidget(advanced)
 
             details = CollapsibleSection("当前状态与详情")
@@ -1302,7 +1264,6 @@ if _HAS_QT:
             self._config = appconfig.load_config()
             self._load_config()
             self._refresh_status()
-            self._refresh_reset()
             self._refresh_plain_badge()
             self._on_backend_changed()
 
@@ -1403,32 +1364,6 @@ if _HAS_QT:
             except Exception as exc:  # pragma: no cover - defensive
                 _update_strip(self.apply_strip, "error", f"状态不可用：{exc}")
                 self._set_status(f"状态不可用：{exc}")
-
-        def _refresh_reset(self) -> None:
-            from . import schema_patch
-
-            schema_id = self.schema_combo.currentData() or self.schema_combo.currentText()
-            display = SCHEMA_LABELS.get(schema_id, schema_id)
-            try:
-                state = schema_patch.compiled_reset_state(schema_id)
-                custom = schema_patch.custom_schema_path(schema_id)
-                rendered = "、".join(
-                    f"{switch_label(name)}（{'会被重置' if value else '可保持'}）"
-                    for name, value in state.items()
-                )
-                self.reset_label.setText(
-                    f"{display}：{rendered or '（无 Language Input 开关）'}"
-                )
-                self.reset_detail_label.setText(
-                    f"方案标识：{schema_id}\n"
-                    f"自定义补丁：{custom}  [{'存在' if custom.is_file() else '不存在'}]\n"
-                    "原始开关：" + "、".join(state.keys() or ["（无）"])
-                )
-            except Exception as exc:
-                self.reset_label.setText(f"{display}：暂不可用（需要先部署一次）。")
-                self.reset_detail_label.setText(
-                    f"方案标识：{schema_id}\n错误：{exc}"
-                )
 
         def _refresh_plain_badge(self) -> None:
             from . import gloss_badge
@@ -1610,42 +1545,6 @@ if _HAS_QT:
                 + "\n详细信息见「当前状态与详情」。",
             )
 
-        def _on_neutralize(self) -> None:
-            schema_id = self.schema_combo.currentData() or self.schema_combo.currentText()
-            display = SCHEMA_LABELS.get(schema_id, schema_id)
-            if (
-                QMessageBox.question(
-                    self,
-                    "确认",
-                    f"将写入 {display} 的自定义补丁并重新部署，移除 Language Input "
-                    "开关的显式重置，使所选选项可在重开会话后保持。\n\n是否继续？",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                != QMessageBox.Yes
-            ):
-                return
-
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                from . import deploy, schema_patch
-
-                path = schema_patch.neutralize_resets(schema_id)
-                deployer = paths.weasel_deployer_exe(paths.weasel_root())
-                result = deploy.run_deploy(deployer, timeout=120)
-                self._refresh_reset()
-                QMessageBox.information(
-                    self,
-                    "结果",
-                    f"自定义补丁：{Path(path).is_file() and '已写入' or '未写入'}\n"
-                    f"部署退出码：{result.exit_code}  忙：{result.busy}\n"
-                    f"错误输出：{result.stderr or '（空）'}",
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                QMessageBox.critical(self, "失败", str(exc))
-            finally:
-                QApplication.restoreOverrideCursor()
-
     class AppearancePage(QWidget):
         """外观 page: candidate-window colour scheme, font size and layout.
 
@@ -1706,7 +1605,7 @@ if _HAS_QT:
             layout_layout.addWidget(self.v_radio)
             layout_layout.addStretch(1)
 
-            self.inline_check = QCheckBox("行内预编辑（inline_preedit）")
+            self.inline_check = QCheckBox("行内预编辑")
             self.inline_check.setToolTip(
                 "inline_preedit：在候选窗内直接编辑编码（而非另开一行）。"
             )
@@ -1923,7 +1822,7 @@ if _HAS_QT:
             self.hotkey_table.setSelectionMode(QAbstractItemView.SingleSelection)
             self.hotkey_table.setShowGrid(False)
             self.hotkey_table.verticalHeader().setVisible(False)
-            self.hotkey_table.verticalHeader().setDefaultSectionSize(28)
+            self.hotkey_table.verticalHeader().setDefaultSectionSize(32)
             self.hotkey_table.setMinimumHeight(200)
             header = self.hotkey_table.horizontalHeader()
             header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -2199,6 +2098,11 @@ if _HAS_QT:
                 "（已学词不再参与候选排序）。"
             )
             warning.setProperty("state", "warning")
+            # Dynamic-property selectors are only re-evaluated on polish, so
+            # re-polish explicitly to pick up QLabel#Caption[state="warning"].
+            warning_style = warning.style()
+            warning_style.unpolish(warning)
+            warning_style.polish(warning)
             learning_card.body.addWidget(warning)
 
             self.learning_check = QCheckBox("启用用户词典学习（默认开启）")
@@ -2569,8 +2473,8 @@ if _HAS_QT:
             brand_box = QWidget()
             brand_box.setObjectName("CardInner")
             brand_layout = QVBoxLayout(brand_box)
-            brand_layout.setContentsMargins(16, 20, 16, 12)
-            brand_layout.setSpacing(2)
+            brand_layout.setContentsMargins(16, 16, 16, 12)
+            brand_layout.setSpacing(4)
             brand = QLabel("Language Input")
             brand.setObjectName("Brand")
             sub = QLabel("设置")
@@ -2628,7 +2532,7 @@ if _HAS_QT:
             right.setObjectName("CardInner")
             right_layout = QHBoxLayout(right)
             right_layout.setContentsMargins(0, 0, 8, 0)
-            right_layout.setSpacing(6)
+            right_layout.setSpacing(8)
             self.status_dot = StateDot("success", 8)
             self.status_right = QLabel("单实例已启用")
             self.status_right.setObjectName("StatusText")
