@@ -49,7 +49,7 @@ GLM 审阅的是**当前 tree**（此前已加入 `winproc.py` 的免控制台�
 | **N3** | ✅ CONFIRMED：`_read_text` 用 `Path.read_text`（已归一化换行），正则里的 `\r?` 与「CRLF 源」注释是死代码 | 删除 `\r?` 与相关注释 |
 | **N4** | ✅ CONFIRMED：`set_user_yaml_option` 先备份再做 no-op 判断，重复应用堆积备份 | 先判断再备份 |
 
-**D1（暂缓，不实施）**：所有实机操作（apply/sync/neutralize/install）都在 Qt 主线程上跑完整个 停/轮询/启动 事务，UI 会冻结。修复方向见 §11 R26。
+**D1（已完成，随 R26 落地）**：所有实机操作（apply/sync/neutralize/install）都已移出 Qt 主线程：`TransactionWorker(QObject)` 被移入每次新建的 `QThread`，只发 `started` / `finished` / `failed` 信号；所有控件更新都在主线程槽里完成。各页共享 `BusyStrip`（不确定进度条 + 状态行）呈现「正在…」。修复方向与验收见 §11 R26。
 
 **行尾**：本项目已统一 **LF**（不再保留 CRLF）。`--selftest` 与所有写入路径均输出 UTF-8 无 BOM + LF；`.gitattributes` 移除了 PowerShell 的 CRLF 例外。
 
@@ -328,7 +328,7 @@ QuickMT 三件套 ≈ 1.22GB；M2M100 ≈ 500MB。
 | **R23** | **词典译注与 AI 开关相互独立（Lua 强制）** | UI 建模为受约束选择（§5.7，V5） |
 | **R24** | 配置归属缺少挂接点 | 写明 `__include`/`__patch` 挂接点与优先级（§5.6） |
 | **R25** | **GLM 第三方审阅**（审阅当前 tree）发现的实机缺陷 | ✅ 全部核实为真并修复（B1–B4 / S1–S8 / N1–N4，见 §0「GLM 审阅处置」） |
-| **R26** | **实机事务阻塞 Qt 主线程**（apply / sync / neutralize / install 期间 UI 冻结） | **TODO（暂缓，D1）**：把整个 停/轮询/启动 事务移入 `QThread`，用 `signal`/`slot` 回主线程更新 UI；worker 内绝不直接操作 `QWidget` |
+| **R26** | **实机事务阻塞 Qt 主线程**（apply / sync / neutralize / install 期间 UI 冻结） | ✅ **已完成（D1）**：`TransactionWorker(QObject)` 移入每次新建的 `QThread`，只发 `started(str)` / `finished(object)` / `failed(str)`，主线程槽更新 UI（worker 绝不碰 `QWidget`）。各页共享 `BusyStrip`（不确定 `QProgressBar` + 状态行），事务期间禁用本页控件、完成后在既有状态条显示结果；**无「取消」按钮**（中止会留下停掉的输入法服务）。托盘「退出」在事务期间拒绝退出并提示。 |
 
 ## 12. 里程碑（先验证，再写码）
 
@@ -373,5 +373,5 @@ QuickMT 三件套 ≈ 1.22GB；M2M100 ≈ 500MB。
 | 21 | 代码仓：`F:\documents\software\langInput`（`third-party/` 已 gitignore；`.gitattributes` 全源文件 **LF**，含 PowerShell） | ✅ 已建 |
 | 22 | **Codex CLI 复审** | ⏳ **未完成**：撞 ChatGPT 用量上限（`try again at 3:40 AM`），退出码 1、无产出 → 需重试 |
 | 23 | **GLM 第三方审阅**（独立模型，审阅当前 tree） | ✅ 完成。B1–B4 / S1–S8 / N1–N4 **全部 CONFIRMED 并已修复**；无 NOT-REPRODUCED 项（§0「GLM 审阅处置」） |
-| 24 | **D1（暂缓，不实施）**：实机事务阻塞 Qt 主线程 | ⏳ 记录于 §11 R26；方向 = `QThread` + signal/slot，不在本次实施 |
+| 24 | ~~**D1（暂缓，不实施）**：实机事务阻塞 Qt 主线程~~ → **已实施**：`QThread` + signal/slot，worker 不碰 `QWidget`；各页共享 busy 进度呈现 | ✅ 已完成（R26） |
 | 25 | 行尾统一 **LF**（不再保留 CRLF）；移除 `.gitattributes` 的 PowerShell CRLF 例外 | ✅ 已定并落地 |

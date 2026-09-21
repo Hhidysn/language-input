@@ -45,6 +45,11 @@ _SINGLE_INSTANCE_MUTEX = "Global\\LanguageInputSettings"
 _ERROR_ALREADY_EXISTS = 183
 _TRAY_TITLE = "Language Input 设置"
 
+# Shown by every ``应用`` action that goes through a stop/start transaction.
+# The wording is deliberately plain: the whole input method service is restarted
+# and typing is unavailable for the duration, so the user knows what to expect.
+_RESTART_WARNING = "此操作会重启输入法服务，期间无法打字，是否继续？"
+
 # Kept alive for the process lifetime so the single-instance mutex is held.
 _instance_handle = None
 
@@ -204,7 +209,7 @@ def theme_qss_path() -> Path:
 # so the diagnostic report can run even where PySide6 is unavailable.
 
 try:  # pragma: no cover - exercised by the smoke test
-    from PySide6.QtCore import QPointF, QSize, Qt
+    from PySide6.QtCore import QObject, QPointF, QSize, Qt, QThread, Signal, Slot
     from PySide6.QtGui import (
         QAction,
         QBrush,
@@ -233,6 +238,7 @@ try:  # pragma: no cover - exercised by the smoke test
         QMainWindow,
         QMenu,
         QMessageBox,
+        QProgressBar,
         QPushButton,
         QRadioButton,
         QScrollArea,
@@ -668,6 +674,180 @@ if _HAS_QT:
 
         def addLayout(self, layout) -> None:
             self.content_layout.addLayout(layout)
+
+    # --- off-thread transactions + busy presentation ------------------------
+
+    class TransactionWorker(QObject):
+        """Runs one callable off the Qt main thread; emits, never touches widgets.
+
+        Created fresh for every run.  ``run`` is invoked by the owning
+        ``QThread``'s event loop; it only emits signals.  The receiving slots
+        live on a main-thread object, so Qt delivers the payload with a queued
+        connection and every widget mutation stays on the GUI thread.
+        """
+
+        started = Signal(str)
+        finished = Signal(object)
+        failed = Signal(str)
+
+        def __init__(self, func, status: str, kwargs: dict | None = None) -> None:
+            super().__init__()
+            self._func = func
+            self._status = status
+            self._kwargs = dict(kwargs or {})
+            self._ran = False
+
+        @Slot()
+        def run(self) -> None:
+            if self._ran:  # guard against a double-start
+                return
+            self._ran = True
+            self.started.emit(self._status)
+            try:
+                result = self._func(**self._kwargs)
+            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+                self.failed.emit(f"{type(exc).__name__}: {exc}")
+            else:
+                self.finished.emit(result)
+
+    class BusyStrip(QWidget):
+        """Shared indeterminate progress bar + status line for a transaction.
+
+        Hidden while idle.  The bar never shows a percentage: the underlying
+        stop/poll/start transaction has no meaningful progress fraction, so an
+        indeterminate bar plus a human status line is the honest presentation.
+        """
+
+        def __init__(self, parent=None) -> None:
+            super().__init__(parent)
+            self.setObjectName("BusyStrip")
+            row = QHBoxLayout(self)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(8)
+            self.bar = QProgressBar()
+            self.bar.setObjectName("BusyBar")
+            self.bar.setRange(0, 0)  # indeterminate (0,0)
+            self.bar.setTextVisible(False)
+            self.bar.setFixedWidth(160)
+            self.label = QLabel("")
+            self.label.setObjectName("BusyText")
+            self.label.setWordWrap(True)
+            row.addWidget(self.bar)
+            row.addWidget(self.label, 1)
+            self.setVisible(False)
+
+        def start(self, text: str) -> None:
+            self.label.setText(text)
+            self.bar.setRange(0, 0)
+            self.setVisible(True)
+
+        def stop(self) -> None:
+            self.bar.setRange(0, 1)
+            self.setVisible(False)
+
+    class TransactionController(QObject):
+        """Runs a blocking callable on a worker thread and presents a busy state.
+
+        There is deliberately **no Cancel button**.  A transaction is a
+        stop -> poll -> write -> deploy -> start sequence; aborting it halfway
+        could leave WeaselServer stopped (the user cannot type at all) or the
+        configuration half-written.  The correct affordance is a visible
+        "the app is working" state that blocks re-entry, not a kill switch.
+        """
+
+        # Emitted on the main thread after the busy state is cleared and the
+        # per-run success/error callback has run.  Useful for tests.
+        run_finished = Signal(object)
+
+        def __init__(self, busy: "BusyStrip", controls, parent=None) -> None:
+            super().__init__(parent)
+            self._busy = busy
+            self._controls = controls  # callable -> iterable[QWidget]
+            self._thread: QThread | None = None
+            self._worker: TransactionWorker | None = None
+            self._active = False
+            self._callbacks: tuple | None = None
+            self._active_busy = busy
+
+        @property
+        def active(self) -> bool:
+            return self._active
+
+        def run(
+            self,
+            status: str,
+            func,
+            *,
+            on_success,
+            on_error,
+            busy: "BusyStrip | None" = None,
+            **kwargs,
+        ) -> bool:
+            """Start ``func(**kwargs)`` off-thread; return False if already busy."""
+            if self._active:
+                return False
+            self._active = True
+            self._callbacks = (on_success, on_error)
+            self._active_busy = busy or self._busy
+            self._active_busy.start(status)
+            self._set_controls(False)
+
+            thread = QThread()
+            worker = TransactionWorker(func, status, kwargs)
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.started.connect(self._on_started)
+            worker.finished.connect(self._on_finished)
+            worker.failed.connect(self._on_failed)
+            worker.finished.connect(thread.quit)
+            worker.failed.connect(thread.quit)
+            thread.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.finished.connect(self._on_thread_finished)
+            self._thread = thread
+            self._worker = worker
+            thread.start()
+            return True
+
+        # -- main-thread slots -------------------------------------------------
+
+        @Slot(str)
+        def _on_started(self, status: str) -> None:
+            self._active_busy.start(status)
+
+        @Slot(object)
+        def _on_finished(self, result: object) -> None:
+            on_success, _on_error = self._callbacks or (None, None)
+            self._callbacks = None
+            self._busy.stop()
+            self._set_controls(True)
+            if callable(on_success):
+                on_success(result)
+            self.run_finished.emit(result)
+
+        @Slot(str)
+        def _on_failed(self, message: str) -> None:
+            _on_success, on_error = self._callbacks or (None, None)
+            self._callbacks = None
+            self._busy.stop()
+            self._set_controls(True)
+            if callable(on_error):
+                on_error(message)
+            self.run_finished.emit({"_failed": True, "error": message})
+
+        @Slot()
+        def _on_thread_finished(self) -> None:
+            # ``_active`` stays True until here, so a new run cannot start
+            # while a thread is still cleaning up; exactly one thread is ever
+            # in flight, so clearing unconditionally is safe.
+            self._thread = None
+            self._worker = None
+            self._active = False
+
+        def _set_controls(self, enabled: bool) -> None:
+            for widget in list(self._controls()):
+                if widget is not None:
+                    widget.setEnabled(enabled)
 
     # --- icons (drawn with QPainter) ---------------------------------------
 
@@ -1219,6 +1399,9 @@ if _HAS_QT:
             self.apply_strip.setWordWrap(True)
             layout.addWidget(self.apply_strip)
 
+            self.busy = BusyStrip()
+            layout.addWidget(self.busy)
+
             # -- advanced (collapsed): badge + schema reset --
             advanced = CollapsibleSection("高级")
             self._badge_loading = False
@@ -1268,6 +1451,29 @@ if _HAS_QT:
             self._refresh_status()
             self._refresh_plain_badge()
             self._on_backend_changed()
+
+            self._tx = TransactionController(
+                self.busy, self._interactive_controls, parent=self
+            )
+
+        # -- off-thread transaction support --
+
+        def _interactive_controls(self):
+            controls = [
+                self.apply_button,
+                self.plain_badge_check,
+                self.badge_refresh_button,
+                self.url_edit,
+                self.api_key_edit,
+                self.api_key_toggle,
+                self.model_edit,
+                self.language_combo,
+            ]
+            controls.extend(self._backend_buttons.buttons())
+            return controls
+
+        def transaction_active(self) -> bool:
+            return self._tx.active
 
         # -- helpers --
 
@@ -1400,29 +1606,27 @@ if _HAS_QT:
             if self._badge_loading:
                 return
 
-            self.plain_badge_check.setEnabled(False)
-            self.badge_refresh_button.setEnabled(False)
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            result: dict
-            try:
-                from . import gloss_badge
+            from . import gloss_badge
 
-                if checked:
-                    result = gloss_badge.apply_plain_gloss(deploy=True)
-                else:
-                    result = gloss_badge.revert_plain_gloss(deploy=True)
-            except Exception as exc:
-                QMessageBox.critical(
-                    self,
-                    "简洁译注失败",
-                    f"{type(exc).__name__}: {exc}",
-                )
-                result = {"ok": False, "error": str(exc)}
-            finally:
-                QApplication.restoreOverrideCursor()
-                self.plain_badge_check.setEnabled(True)
-                self.badge_refresh_button.setEnabled(True)
+            func = (
+                gloss_badge.apply_plain_gloss
+                if checked
+                else gloss_badge.revert_plain_gloss
+            )
+            started = self._tx.run(
+                "正在切换简洁译注并重新部署…",
+                func,
+                deploy=True,
+                on_success=lambda result: self._on_plain_badge_done(checked, result),
+                on_error=lambda message: self._on_plain_badge_failed(checked, message),
+            )
+            if not started:  # another transaction is running; undo the toggle
+                self._badge_loading = True
+                self.plain_badge_check.setChecked(not checked)
+                self._badge_loading = False
 
+        def _on_plain_badge_done(self, checked: bool, result: dict) -> None:
+            self._on_backend_changed()
             self._refresh_plain_badge()
 
             deploy = result.get("deploy") or {}
@@ -1442,6 +1646,13 @@ if _HAS_QT:
                     f"部署退出码：{deploy.get('exit_code')}  "
                     f"错误输出：{deploy.get('stderr') or '（空）'}",
                 )
+
+        def _on_plain_badge_failed(self, checked: bool, message: str) -> None:
+            self._on_backend_changed()
+            self._badge_loading = True
+            self.plain_badge_check.setChecked(not checked)
+            self._badge_loading = False
+            QMessageBox.critical(self, "简洁译注失败", message)
 
         # -- actions --
 
@@ -1466,7 +1677,7 @@ if _HAS_QT:
                 f"端点：{url or '（不适用）'}\n"
                 f"模型：{model or '（不适用）'}\n"
                 f"目标语言：{language_label(language)}\n\n"
-                "这会停止并重启输入法服务（进行中的输入会中断），"
+                f"{_RESTART_WARNING}\n"
                 "并可能清除 AI 缓存。"
             )
             if (
@@ -1497,24 +1708,22 @@ if _HAS_QT:
                 QMessageBox.critical(self, "配置保存失败", str(exc))
                 return
 
-            self.apply_button.setEnabled(False)
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                from . import server
+            from . import server
 
-                result = server.apply_backend(
-                    backend,
-                    url=url or None,
-                    api_key=api_key or None,
-                    model=model or None,
-                    language=language or None,
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                result = {"ok": False, "errors": [str(exc)]}
-            finally:
-                QApplication.restoreOverrideCursor()
-                self.apply_button.setEnabled(True)
+            self._tx.run(
+                "正在应用配置并重启输入法服务…",
+                server.apply_backend,
+                backend=backend,
+                url=url or None,
+                api_key=api_key or None,
+                model=model or None,
+                language=language or None,
+                on_success=lambda result: self._on_apply_done(backend, result),
+                on_error=self._on_apply_error,
+            )
 
+        def _on_apply_done(self, backend: str, result: dict) -> None:
+            self._on_backend_changed()
             self._refresh_status()
             if result.get("ok"):
                 _update_strip(
@@ -1546,6 +1755,11 @@ if _HAS_QT:
                 ("应用成功。" if result.get("ok") else "应用未完成。")
                 + "\n详细信息见「当前状态与详情」。",
             )
+
+        def _on_apply_error(self, message: str) -> None:
+            self._on_backend_changed()
+            _update_strip(self.apply_strip, "error", f"应用失败：{message}")
+            QMessageBox.critical(self, "应用失败", message)
 
     class AppearancePage(QWidget):
         """外观 page: candidate-window colour scheme, font size and layout.
@@ -1633,6 +1847,9 @@ if _HAS_QT:
             self.strip.setObjectName("StatusStrip")
             self.strip.setWordWrap(True)
             card.body.addWidget(self.strip)
+
+            self.busy = BusyStrip()
+            card.body.addWidget(self.busy)
             layout.addWidget(card)
 
             current_card = Card()
@@ -1656,6 +1873,26 @@ if _HAS_QT:
             layout.addStretch(1)
 
             self._load()
+
+            self._tx = TransactionController(
+                self.busy, self._interactive_controls, parent=self
+            )
+
+        # -- off-thread transaction support --
+
+        def _interactive_controls(self):
+            return [
+                self.scheme_combo,
+                self.font_spin,
+                self.h_radio,
+                self.v_radio,
+                self.inline_check,
+                self.refresh_button,
+                self.apply_button,
+            ]
+
+        def transaction_active(self) -> bool:
+            return self._tx.active
 
         # -- helpers --
 
@@ -1731,17 +1968,27 @@ if _HAS_QT:
                 "style/horizontal": self.h_radio.isChecked(),
                 "style/inline_preedit": self.inline_check.isChecked(),
             }
-            self.apply_button.setEnabled(False)
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                result = rime_settings.apply_style(patch)
-            except Exception as exc:  # pragma: no cover - defensive
-                QMessageBox.critical(self, "外观应用失败", str(exc))
-                result = {"changed": False, "error": str(exc)}
-            finally:
-                QApplication.restoreOverrideCursor()
-                self.apply_button.setEnabled(True)
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认应用",
+                    _RESTART_WARNING,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
 
+            self._tx.run(
+                "正在应用外观并重新部署…",
+                rime_settings.apply_style,
+                patch=patch,
+                on_success=self._on_apply_done,
+                on_error=self._on_apply_error,
+            )
+
+        def _on_apply_done(self, result: dict) -> None:
             self._load()
             if result.get("changed"):
                 if result.get("clean"):
@@ -1757,6 +2004,10 @@ if _HAS_QT:
                     )
             else:
                 _update_strip(self.strip, "neutral", "没有需要写入的更改。")
+
+        def _on_apply_error(self, message: str) -> None:
+            _update_strip(self.strip, "error", f"外观应用失败：{message}")
+            QMessageBox.critical(self, "外观应用失败", message)
 
     class KeysPage(QWidget):
         """按键与开关 page: constrained Language Input switches + hotkeys."""
@@ -1804,6 +2055,9 @@ if _HAS_QT:
             self.strip.setObjectName("StatusStrip")
             self.strip.setWordWrap(True)
             switches_card.body.addWidget(self.strip)
+
+            self.busy = BusyStrip()
+            switches_card.body.addWidget(self.busy)
             layout.addWidget(switches_card)
 
             hotkey_card = Card()
@@ -1856,6 +2110,7 @@ if _HAS_QT:
             reset_button = QPushButton("刷新")
             reset_button.clicked.connect(self._refresh_reset)
             reset_row.addWidget(reset_button)
+            self.reset_button = reset_button
             reset_row.addStretch(1)
             advanced.addLayout(reset_row)
             self.reset_label = QLabel("")
@@ -1871,6 +2126,22 @@ if _HAS_QT:
 
             self._refresh()
             self._refresh_reset()
+
+            self._tx = TransactionController(
+                self.busy, self._interactive_controls, parent=self
+            )
+
+        # -- off-thread transaction support --
+
+        def _interactive_controls(self):
+            controls = [self.refresh_button, self.apply_button, self.schema_combo,
+                        self.neutralize_button, self.reset_button]
+            controls.extend(self._checkboxes.values())
+            controls.extend(self._radios.values())
+            return controls
+
+        def transaction_active(self) -> bool:
+            return self._tx.active
 
         # -- helpers --
 
@@ -1992,17 +2263,27 @@ if _HAS_QT:
                 _update_strip(self.strip, "neutral", "没有需要写入的更改。")
                 return
 
-            self.apply_button.setEnabled(False)
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                result = rime_settings.set_switches(changes)
-            except Exception as exc:  # pragma: no cover - defensive
-                QMessageBox.critical(self, "开关应用失败", str(exc))
-                result = {}
-            finally:
-                QApplication.restoreOverrideCursor()
-                self.apply_button.setEnabled(True)
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认应用",
+                    _RESTART_WARNING,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
 
+            self._tx.run(
+                "正在应用开关并重新部署…",
+                rime_settings.set_switches,
+                changes=changes,
+                on_success=self._on_apply_done,
+                on_error=self._on_apply_error,
+            )
+
+        def _on_apply_done(self, result: dict) -> None:
             self._refresh()
             if result.get("changed"):
                 if result.get("clean"):
@@ -2018,6 +2299,10 @@ if _HAS_QT:
                     )
             else:
                 _update_strip(self.strip, "neutral", "没有需要写入的更改。")
+
+        def _on_apply_error(self, message: str) -> None:
+            _update_strip(self.strip, "error", f"开关应用失败：{message}")
+            QMessageBox.critical(self, "开关应用失败", message)
 
         def _refresh_reset(self) -> None:
             from . import schema_patch
@@ -2051,7 +2336,8 @@ if _HAS_QT:
                     self,
                     "确认",
                     f"将写入 {display} 的自定义补丁并重新部署，移除 Language Input "
-                    "开关的显式重置，使所选选项可在重开会话后保持。\n\n是否继续？",
+                    "开关的显式重置，使所选选项可在重开会话后保持。\n\n"
+                    f"{_RESTART_WARNING}",
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No,
                 )
@@ -2059,26 +2345,41 @@ if _HAS_QT:
             ):
                 return
 
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
+            def _job(*, schema_id: str) -> dict:
                 from . import deploy, schema_patch
 
                 path = schema_patch.neutralize_resets(schema_id)
                 deployer = paths.weasel_deployer_exe(paths.weasel_root())
                 result = deploy.run_deploy(deployer, timeout=120)
-                self._refresh_reset()
-                self._refresh()
-                QMessageBox.information(
-                    self,
-                    "结果",
-                    f"自定义补丁：{Path(path).is_file() and '已写入' or '未写入'}\n"
-                    f"部署退出码：{result.exit_code}  忙：{result.busy}\n"
-                    f"错误输出：{result.stderr or '（空）'}",
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                QMessageBox.critical(self, "失败", str(exc))
-            finally:
-                QApplication.restoreOverrideCursor()
+                return {
+                    "path": str(path),
+                    "exit_code": result.exit_code,
+                    "busy": result.busy,
+                    "stderr": result.stderr,
+                    "timed_out": result.timed_out,
+                }
+
+            self._tx.run(
+                "正在写入补丁并重新部署…",
+                _job,
+                schema_id=schema_id,
+                on_success=self._on_neutralize_done,
+                on_error=lambda message: self._on_neutralize_error(display, message),
+            )
+
+        def _on_neutralize_done(self, result: dict) -> None:
+            self._refresh_reset()
+            self._refresh()
+            QMessageBox.information(
+                self,
+                "结果",
+                f"自定义补丁：{Path(result['path']).is_file() and '已写入' or '未写入'}\n"
+                f"部署退出码：{result.get('exit_code')}  忙：{result.get('busy')}\n"
+                f"错误输出：{result.get('stderr') or '（空）'}",
+            )
+
+        def _on_neutralize_error(self, display: str, message: str) -> None:
+            QMessageBox.critical(self, "失败", f"{display}：{message}")
 
     class DictionaryPage(QWidget):
         """词库与记忆 page: learning toggle, user-dictionary state, sync, /dict."""
@@ -2134,6 +2435,9 @@ if _HAS_QT:
             self.learning_strip.setObjectName("StatusStrip")
             self.learning_strip.setWordWrap(True)
             learning_card.body.addWidget(self.learning_strip)
+
+            self.learning_busy = BusyStrip()
+            learning_card.body.addWidget(self.learning_busy)
             layout.addWidget(learning_card)
 
             actions_card = Card()
@@ -2159,6 +2463,9 @@ if _HAS_QT:
             self.action_strip.setObjectName("StatusStrip")
             self.action_strip.setWordWrap(True)
             actions_card.body.addWidget(self.action_strip)
+
+            self.action_busy = BusyStrip()
+            actions_card.body.addWidget(self.action_busy)
             self.note_label = _caption_label(rime_settings.dict_manager_note())
             actions_card.body.addWidget(self.note_label)
             layout.addWidget(actions_card)
@@ -2174,6 +2481,24 @@ if _HAS_QT:
 
             _update_strip(self.action_strip, "neutral", "尚未执行同步或打开词典管理。")
             self._refresh()
+
+            self._tx = TransactionController(
+                self.learning_busy, self._interactive_controls, parent=self
+            )
+
+        # -- off-thread transaction support --
+
+        def _interactive_controls(self):
+            return [
+                self.learning_check,
+                self.learning_refresh,
+                self.learning_apply,
+                self.sync_button,
+                self.dict_button,
+            ]
+
+        def transaction_active(self) -> bool:
+            return self._tx.active
 
         # -- helpers --
 
@@ -2224,17 +2549,27 @@ if _HAS_QT:
 
         def _on_apply_learning(self) -> None:
             on = self.learning_check.isChecked()
-            self.learning_apply.setEnabled(False)
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                result = rime_settings.set_learning(on)
-            except Exception as exc:  # pragma: no cover - defensive
-                QMessageBox.critical(self, "学习设置失败", str(exc))
-                result = {}
-            finally:
-                QApplication.restoreOverrideCursor()
-                self.learning_apply.setEnabled(True)
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认应用",
+                    _RESTART_WARNING,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
 
+            self._tx.run(
+                "正在应用学习设置并重新部署…",
+                rime_settings.set_learning,
+                on=on,
+                on_success=lambda result: self._on_learning_done(on, result),
+                on_error=self._on_learning_error,
+            )
+
+        def _on_learning_done(self, on: bool, result: dict) -> None:
             self._refresh()
             if not result:
                 return
@@ -2254,17 +2589,21 @@ if _HAS_QT:
                     f"stderr：{deploy.get('stderr') or '（空）'}",
                 )
 
-        def _on_sync(self) -> None:
-            self.sync_button.setEnabled(False)
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                result = rime_settings.sync_user_data()
-            except Exception as exc:  # pragma: no cover - defensive
-                result = {"clean": False, "note": str(exc)}
-            finally:
-                QApplication.restoreOverrideCursor()
-                self.sync_button.setEnabled(True)
+        def _on_learning_error(self, message: str) -> None:
+            self._refresh()
+            _update_strip(self.learning_strip, "error", f"学习设置失败：{message}")
+            QMessageBox.critical(self, "学习设置失败", message)
 
+        def _on_sync(self) -> None:
+            self._tx.run(
+                "正在同步用户数据…",
+                rime_settings.sync_user_data,
+                busy=self.action_busy,
+                on_success=self._on_sync_done,
+                on_error=self._on_sync_error,
+            )
+
+        def _on_sync_done(self, result: dict) -> None:
             if result.get("clean"):
                 _update_strip(self.action_strip, "success", result.get("note", "已同步。"))
             elif result.get("busy"):
@@ -2275,6 +2614,9 @@ if _HAS_QT:
                     "error",
                     result.get("note", "同步未完成。"),
                 )
+
+        def _on_sync_error(self, message: str) -> None:
+            _update_strip(self.action_strip, "error", f"同步未完成：{message}")
 
         def _on_open_dict_manager(self) -> None:
             try:
@@ -2382,6 +2724,9 @@ if _HAS_QT:
             self.strip.setObjectName("StatusStrip")
             self.strip.setWordWrap(True)
             action_card.body.addWidget(self.strip)
+
+            self.busy = BusyStrip()
+            action_card.body.addWidget(self.busy)
             row = QHBoxLayout()
             self.redeploy_button = QPushButton("重新部署")
             self.redeploy_button.setObjectName("PrimaryButton")
@@ -2393,6 +2738,7 @@ if _HAS_QT:
                 lambda: self._open_path(paths.rime_user_dir())
             )
             row.addWidget(open_data)
+            self.open_data_button = open_data
             action_card.body.addLayout(row)
             self.detail_label = QLabel("")
             self.detail_label.setObjectName("DetailValue")
@@ -2403,6 +2749,18 @@ if _HAS_QT:
             layout.addStretch(1)
 
             _update_strip(self.strip, "neutral", "尚未在本次会话中部署。")
+
+            self._tx = TransactionController(
+                self.busy, self._interactive_controls, parent=self
+            )
+
+        # -- off-thread transaction support --
+
+        def _interactive_controls(self):
+            return [self.redeploy_button, self.open_data_button]
+
+        def transaction_active(self) -> bool:
+            return self._tx.active
 
         def _open_path(self, path: Path) -> None:
             try:
@@ -2417,12 +2775,16 @@ if _HAS_QT:
             from . import deploy
 
             deployer = paths.weasel_deployer_exe(paths.weasel_root())
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                result = deploy.run_deploy(deployer, timeout=120)
-            finally:
-                QApplication.restoreOverrideCursor()
+            self._tx.run(
+                "正在重新部署…",
+                deploy.run_deploy,
+                deployer_exe=deployer,
+                timeout=120,
+                on_success=lambda result: self._on_redeploy_done(deployer, result),
+                on_error=self._on_redeploy_error,
+            )
 
+        def _on_redeploy_done(self, deployer, result) -> None:
             if not result.ran:
                 state, text = "error", "未能启动部署器。"
             elif result.timed_out:
@@ -2445,6 +2807,9 @@ if _HAS_QT:
                 f"提示：{result.note}\n"
                 f"错误输出：{result.stderr or '（空）'}"
             )
+
+        def _on_redeploy_error(self, message: str) -> None:
+            _update_strip(self.strip, "error", f"部署失败：{message}")
 
     class MainWindow(QMainWindow):
         """Settings window: left nav + stacked pages + status bar."""
@@ -2560,6 +2925,18 @@ if _HAS_QT:
             self._force_close = True
             self.close()
 
+        def transaction_active(self) -> bool:
+            """True while any page is running an off-thread transaction.
+
+            The tray ``退出`` handler consults this so the process cannot quit
+            in the middle of a stop/start transaction.
+            """
+            for page in self.pages.values():
+                guard = getattr(page, "transaction_active", None)
+                if callable(guard) and guard():
+                    return True
+            return False
+
     class SettingsApp:
         """Owns the main window and the system-tray icon (main thread only)."""
 
@@ -2614,6 +2991,22 @@ if _HAS_QT:
                 self.show_window()
 
         def quit(self) -> None:
+            if self.window.transaction_active():
+                # Refuse to quit mid-transaction: aborting the stop -> poll ->
+                # start sequence could leave WeaselServer stopped (no typing)
+                # or the config half-written.  Report it instead of ignoring
+                # the click.
+                self.show_window()
+                try:
+                    self.tray.showMessage(
+                        _TRAY_TITLE,
+                        "正在重启输入法服务，请等待操作完成后再退出。",
+                        QSystemTrayIcon.Warning,
+                        4000,
+                    )
+                except Exception:
+                    pass
+                return
             try:
                 self.tray.hide()
             except Exception:
