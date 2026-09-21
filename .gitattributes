@@ -1,0 +1,25 @@
+# Line-ending policy.
+# The app mandates LF for every file it WRITES; keep the repo consistent with that.
+* text=auto
+
+# Python / config / docs: LF everywhere
+*.py      text eol=lf
+*.qss     text eol=lf
+*.json    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.toml    text eol=lf
+*.spec    text eol=lf
+*.svg     text eol=lf
+*.md      text eol=lf
+*.txt     text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Windows shell scripts: CRLF (PowerShell conventions)
+*.ps1     text eol=crlf
+*.bat     text eol=crlf
+
+# Binary assets
+*.ico     binary
+*.png     binary
