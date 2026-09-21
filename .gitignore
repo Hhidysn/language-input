@@ -1,0 +1,28 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ---- virtualenv ----
+settings-app/.venv/
+
+# ---- build / packaging artifacts ----
+settings-app/build/
+settings-app/dist/
+settings-app/.shots/
+settings-app/.m0/
+
+# ---- local backups & temporaries ----
+*.bak-*
+*.bak
+*.part
+*.tmp
+
+# ---- editor / agent session data ----
+.opencode/
+.vscode/
+.idea/
+
+# ---- upstream reference clones (separate repositories, not part of this product) ----
+# third-party/{MSIME-Windows,qingjian,weasel} are reference checkouts; keep them out of this repo
+third-party/

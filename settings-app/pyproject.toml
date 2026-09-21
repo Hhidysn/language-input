@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "language-input-settings"
+version = "0.1.0"
+description = "Tray settings application for the Language Input (Weasel/Rime) project."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Language Input project" }]
+keywords = ["rime", "weasel", "language-input", "pyside6", "qt", "tray"]
+classifiers = [
+  "Environment :: Win32 (MS Windows)",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Desktop Environment",
+]
+# GUI stack is PySide6 (Qt for Python).  The earlier non-Qt pivot was a
+# misdiagnosis caused by a proxy throttle that made PyPI look unreachable
+# (see design doc §6 / decision #13); assets/icon.ico is a committed asset and
+# no imaging/tray library is required.
+dependencies = [
+  "PySide6-Essentials>=6.11",
+  "ruamel.yaml>=0.18",
+]
+
+[project.scripts]
+language-input-settings = "language_input_settings.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+# Vendored per-file trust descriptors for QuickMT (design doc §7.3 / R10).
+[tool.setuptools.package-data]
+language_input_settings = ["data/components/*.json"]
