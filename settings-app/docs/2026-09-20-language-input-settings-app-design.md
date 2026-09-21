@@ -334,4 +334,8 @@ QuickMT 三件套 ≈ 1.22GB；M2M100 ≈ 500MB。
 | 15 | GUI 栈最终 = **PySide6**（已装 6.11.2，GUI 层已回迁并验证） | ✅ 已完成 |
 | 16 | M2M100 不做（本地缺 license/notice）；新模型调研结论：**无更优候选** | ✅ 已定 |
 | 17 | 下载器绕过代理 | ⏳ 待改代码 |
-| 18 | M2 翻译页 / M4 记忆页 / M5 外观按键 / M6 打包 | ⏳ 待做 |
+| 18 | M2 翻译页 / M4 记忆页 / M5 外观与按键页 / M6 打包 | ✅ 全部完成 |
+| 19 | 三页功能化（外观 / 按键与开关 / 词库与记忆） | ✅ 完成并实测（测试改动均已回滚，`user.yaml` / `weasel.custom.yaml` 哈希与起始一致） |
+| 20 | 外部 UI 审阅（**agy** / Google Antigravity，独立模型） | ✅ 完成。C1–C6 复核确认为真并已修复；**C7 部分不成立**（"API 卡片会被禁用"为误判，按钮位置问题为真） |
+| 21 | 代码仓：`F:\documents\software\langInput`（`third-party/` 已 gitignore；`.gitattributes` 固定源文件 LF、PowerShell CRLF） | ✅ 已建（34 个跟踪文件） |
+| 22 | **Codex CLI 复审** | ⏳ **未完成**：撞 ChatGPT 用量上限（`try again at 3:40 AM`），退出码 1、无产出 → 需重试 |
