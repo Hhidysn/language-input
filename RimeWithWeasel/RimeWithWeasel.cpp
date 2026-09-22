@@ -636,7 +636,13 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
       if (remote) {
         if (!comment.empty())
           comment += "  ";
-        comment += remote->MarkedComment();
+        // Display the gloss text only.  The "〔<lang>·AI〕 " marker produced by
+        // RemoteGloss::MarkedComment() is an INTERNAL source tag: the speech
+        // path builds its own marked comment from the lookup result (see the
+        // ParseGlossForSpeech(remote->MarkedComment()) call sites), so omitting
+        // the marker here hides it from the candidate window without breaking
+        // the 朗读 feature.
+        comment += remote->text;
       } else {
         remote_misses.emplace_back(candidate.text);
       }
