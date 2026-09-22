@@ -139,7 +139,9 @@ def restore_defaults(
 
     # --- 4. plain-gloss shadow copy ----------------------------------------
     try:
-        gloss = gloss_badge.revert_plain_gloss(deploy=False)
+        gloss = gloss_badge.revert_plain_gloss(
+            deploy=False, user_dir=resolved_user
+        )
         gloss_changed = bool(gloss.get("removed"))
         items.append(
             {

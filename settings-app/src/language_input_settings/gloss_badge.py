@@ -236,9 +236,16 @@ def apply_plain_gloss(*, deploy: bool = True) -> dict[str, Any]:
     return result
 
 
-def revert_plain_gloss(*, deploy: bool = True) -> dict[str, Any]:
-    """Remove the shadow copy (backing it up first) and redeploy."""
-    user_dir = paths.rime_user_dir()
+def revert_plain_gloss(
+    *, deploy: bool = True, user_dir: str | Path | None = None
+) -> dict[str, Any]:
+    """Remove the shadow copy (backing it up first) and redeploy.
+
+    ``user_dir`` overrides the Rime user directory (used by
+    :func:`restore_defaults.restore_defaults` so a redirected/sandboxed user
+    directory is fully honoured, not just the schema/style/option pieces).
+    """
+    user_dir = Path(user_dir) if user_dir is not None else paths.rime_user_dir()
     shadow = SHADOW_PATH(user_dir)
 
     result: dict[str, Any] = {

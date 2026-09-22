@@ -1,26 +1,12 @@
-# 引擎溯源（Engine provenance）
+# 引擎行为与实测（Engine behaviour & measurements）
 
-本仓库只包含**设置应用**（`settings-app/`）。输入法引擎本身是一个独立的 Weasel/小狼毫(Rime) 分支，
-**不包含在本仓库内**，也**不在本仓库里修改**。
-
-## 引擎位置与来源
-
-| 项 | 值 |
-|---|---|
-| 工作副本 | `F:\documents\software\languageInput` |
-| fork | `https://github.com/Hhidysn/weasel` |
-| upstream | `https://github.com/rime/weasel` |
-| 基线版本 | Weasel **0.17.4**（git tag `0.17.4`） |
-| 产品版本 | **0.17.4.3** |
-| librime | **1.13.1**（git submodule，`rime/librime`） |
-| 分支 | `codex/language-input-v0.2-local-ai` |
-| 提交 | `a57d7f0`（`feat(language-input): add optional M2M100 backend`） |
-| 子模块补丁 | `patches/librime-sensitive-mode.patch`（已应用 → 工作副本里 `librime` 显示为 ` M`） |
-
-> 该分支唯一实质性的自有功能是 **"Language Input v0.2"**：一个 Rime Lua 译注过滤器
-> （`gloss_filter.lua`）+ 一个 CTranslate2/SentencePiece 的 Python 模型宿主
-> （`LanguageInputModelHost.exe`），通过仅回环、带 token 的 OpenAI 兼容接口被 WeaselServer 调用，
-> 为候选词附上离线中→英/日/西 释义；另有 SAPI 朗读，以及一个在敏感输入域关闭学习/模型的 librime 补丁。
+> 本文件只记录**设置应用所依赖的引擎行为**与**实测证据**。
+> 引擎源码、fork/上游、`librime`/`plum` 子模块与 librime 补丁的**位置与仓库结构**，
+> 见仓库根目录的 [`REPO-STRUCTURE.md`](../../REPO-STRUCTURE.md)。
+>
+> 背景：引擎源码**就在本产品仓内**（分支 `language-input-settings`，基点 = fork 提交
+> `a57d7f0`）。设置应用**不编译**引擎，只通过注册表与已安装的可执行文件对接，因此下文
+> 记录的"引擎行为"仍是设置应用需要遵守的契约。
 
 ## 引擎安装位置（设置应用实际对接的对象）
 
@@ -52,18 +38,9 @@
 - 后端环境变量**仅在 WeaselServer 启动时读一次**；`absent` = 本地，真值 = 外接，假值 = 关闭译注。
 - `WeaselDeployer.exe /deploy` 在配置非法时**仍返回 0**（错误只在 stderr）。
 
-## 为什么不把引擎搬进本仓库
-
-1. **独立上游历史**：它是 `rime/weasel` 的 fork，合并进来会重复上游历史并与 `librime`/`plum` 子模块纠缠。
-2. **体积**：含 Boost 依赖树，GB 级。
-3. **搬进来也编不了**：引擎需要 Visual Studio，而本项目的硬约束正是"零 VS 编译"。
-4. **它已有托管**：fork 已在 `Hhidysn/weasel`。
-
-如需更强的可复现性，可把它挂为 git submodule（例如 `engine/` → `Hhidysn/weasel` 的固定提交），
-这样不重复历史又能钉住版本。**当前未挂。**
-
 ## 引擎重建路径（如将来必须）
 
-需要 Visual Studio 2017+（含 ATL/MFC）、CMake、Boost；`git clone --recursive` 后
-`build.bat all` 产出安装包到 `output\archives`。详见引擎仓库自己的 `INSTALL.md`。
+引擎源码已在本仓（`Weasel*`、`RimeWithWeasel` 等目录），但重建需要 Visual Studio 2017+
+（含 ATL/MFC）、CMake、Boost；`git clone --recursive` 后按 `REPO-STRUCTURE.md` 的构建顺序执行
+`build.bat all`，产出安装包到 `output\archives`。详见引擎自己的 `INSTALL.md`。
 本设置应用**不**依赖这条路径 —— 它只对接已安装的引擎。

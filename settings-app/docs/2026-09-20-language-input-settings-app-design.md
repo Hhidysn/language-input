@@ -3,7 +3,7 @@
 - 日期：2026-09-20（rev3 修订于同日）
 - 状态：**已修订，待实施**；已完成两轮独立审阅
 - 目标平台：Windows 10/11 x64
-- 范围：在既有 Weasel/Rime fork（`F:\documents\software\languageInput`）之上新增**独立设置应用**，补齐模型下载/管理与词频记忆。**不编译任何 C++**。
+- 范围：在本**产品仓**（引擎源码 + 设置应用同仓，仓库结构见根目录 `REPO-STRUCTURE.md`）中新增**独立设置应用**，补齐模型下载/管理与词频记忆。设置应用**不编译任何 C++**，只对接已安装的引擎二进制。
 
 ---
 
@@ -77,6 +77,26 @@ GLM 审阅的是**当前 tree**（此前已加入 `winproc.py` 的免控制台�
 | **未验证** | 运行时实际后端、跨会话选项保持、TSF 在 stop 窗口自动拉起（V11） |
 
 **探针产物**：`settings-app\.m0\`（备份 + 原始输出）。`user.yaml` 已按字节还原（SHA256 `1360fc15…`），`WeaselServer.exe` 运行中（LOCAL 态），3 个 QuickMT 模型仍在。
+
+### UI 批次的逐项验证结果（复核轮）
+
+对已提交的功能批（提交标题「real model actions, connectivity probe, GUI revert and restore-defaults」）逐项做行为验证：用一个一次性探针（`settings-app\.work\`，用后即删）以 **stub 后端**驱动**每个真实 GUI handler**，断言离 Qt 主线程执行、确定性进度条推进、控件先禁用后恢复、结果经 signal 到达 UI。结论：**10 项全部 CONFIRMED**；过程中发现并修复 1 处真实缺陷（`gloss_badge.revert_plain_gloss` 未接受 `user_dir` 覆盖 → 「恢复默认」在重定向用户目录下无法被沙箱化、且未覆盖译注影子副本）。
+
+| # | 项 | verdict | 证据 |
+|---|---|---|---|
+| 1 | 按键页重复读取触发器合并为一个 | ✅ CONFIRMED | 高级 reset 区仅「方案」下拉触发 `_refresh_reset`；该区按钮仅「使选项可保持 / 还原重置补丁」，无重复「刷新」 |
+| 2 | 开关标签单一来源（`rime_settings.SWITCH_LABELS`），旧分歧标签消失 | ✅ CONFIRMED | `app.switch_label()` 逐项委托；`翻译模型（多语直译）`/`语音` 在源码中已无，`多语直译模型（M2M100）`/`朗读` 存在；app.py 无重复 `SWITCH_LABELS` |
+| 3 | 模型表行不再是惰性控件 | ✅ CONFIRMED | 无选择时下载/安装按钮禁用；选中行后启用 |
+| 4 | 学习开关文案/确认说明「关闭同时停用已学词条」 | ✅ CONFIRMED | 复选框标签与禁用确认均含「停止使用已学词条」 |
+| 5 | 「重新部署」有确认且要求 stderr 为空 | ✅ CONFIRMED | 确认框存在；拒绝则不启动事务；exit 0 + 非空 stderr 判失败并显示 stderr；exit 0 + 空 stderr 判成功 |
+| 6 | 模型页真实动作经 D1 worker（下载确定性进度条 / 从目录 / `.limodel` / 校验；安装前显示 `requires`） | ✅ CONFIRMED | 各动作均离主线程；下载 `QProgressBar` range 0–100 且推进；期间控件禁用、完成后恢复；结果经 signal 入 UI；安装确认先显示依赖 |
+| 7 | 翻译页外部 API 连通性测试 | ✅ CONFIRMED | 离主线程；`allow_http` 生效、协议校验、8 s 超时、报告延迟/错误；`redact` 生效且结果/UI 均无密钥 |
+| 8 | 方案 reset 的 GUI 回退（带确认） | ✅ CONFIRMED | 确认存在；离主线程；成功状态入 UI |
+| 9 | 「恢复默认」逐项还原、报告、不动模型、无法还原需说明 | ✅ CONFIRMED | 沙箱用户目录内：方案 reset 补丁（文件保留/删除两态）、学习覆盖、托管样式键、简洁译注影子副本、`user.yaml` 选项均按项还原并报告；`last_build_time` 保留；已安装模型未删除；流式 `option:` 映射报告为「无法安全还原」 |
+| 10 | 「打开应用配置目录」+「清除 AI 缓存」（公共包装） | ✅ CONFIRMED | 打开 `appconfig.config_dir()`；`server.clear_ai_cache` 公共包装，确认后离线程执行，缺失时安全 no-op |
+
+**门槛复跑**：`--selftest` exit 0、`--gui-smoke` → `gui_smoke: passed`、`--gui-shot` → 7 PNG、`--version` exit 0。
+**不变量复核**：UTF-8 无 BOM + LF + 原子写 + 先备份（沙箱内可见 `*.bak-*`）；所有写事务离 Qt 主线程；主标签无裸标识符；`QProgressBar` 规则仅用既有色板 token。
 
 ---
 
@@ -373,7 +393,7 @@ QuickMT 三件套 ≈ 1.22GB；M2M100 ≈ 500MB。
 | 18 | M2 翻译页 / M4 记忆页 / M5 外观与按键页 / M6 打包 | ✅ 全部完成 |
 | 19 | 三页功能化（外观 / 按键与开关 / 词库与记忆） | ✅ 完成并实测（测试改动均已回滚，`user.yaml` / `weasel.custom.yaml` 哈希与起始一致） |
 | 20 | 外部 UI 审阅（**agy** / Google Antigravity，独立模型） | ✅ 完成。C1–C6 复核确认为真并已修复；**C7 部分不成立**（"API 卡片会被禁用"为误判，按钮位置问题为真） |
-| 21 | 代码仓：`F:\documents\software\langInput`（`third-party/` 已 gitignore；`.gitattributes` 全源文件 **LF**，含 PowerShell） | ✅ 已建 |
+| 21 | 代码仓：本**产品仓** `F:\documents\software\langInput`（分支 `language-input-settings`，基点 = fork 提交 `a57d7f0`；**引擎源码 + `settings-app/` 同仓**，`librime`/`plum` 为上游子模块，librime 补丁在 `patches/`；仓库结构见根目录 `REPO-STRUCTURE.md`）。`third-party/` 已 gitignore；`.gitattributes` 全源文件 **LF**，含 PowerShell。 | ✅ 已建 |
 | 22 | **Codex CLI 复审** | ⏳ **未完成**：撞 ChatGPT 用量上限（`try again at 3:40 AM`），退出码 1、无产出 → 需重试 |
 | 23 | **GLM 第三方审阅**（独立模型，审阅当前 tree） | ✅ 完成。B1–B4 / S1–S8 / N1–N4 **全部 CONFIRMED 并已修复**；无 NOT-REPRODUCED 项（§0「GLM 审阅处置」） |
 | 24 | ~~**D1（暂缓，不实施）**：实机事务阻塞 Qt 主线程~~ → **已实施**：`QThread` + signal/slot，worker 不碰 `QWidget`；各页共享 busy 进度呈现 | ✅ 已完成（R26） |
