@@ -1,22 +1,24 @@
-# Build the patched LanguageInputModelHost.
+# Build the in-tree LanguageInputModelHost.
 #
 # Produces an onedir/windowed PyInstaller bundle in
-#   patches\model-host\dist\LanguageInputModelHost\
-# using a dedicated virtual environment at patches\model-host\.venv
+#   tools\model-host\dist\LanguageInputModelHost\
+# using a dedicated virtual environment at tools\model-host\.venv
 # (never the settings-app venv).
+#
+# The host source now lives in this repository and is edited in-tree:
+#   scripts\language_input_model_host.py
+# (per-process component-verification cache; no patch/patcher step).
 #
 # The build mirrors scripts\build_model_host.ps1's pinned versions:
 #   Python 3.11, ctranslate2 4.8.1, sentencepiece 0.2.1, numpy 2.4.6,
 #   PyInstaller 6.15.0.
 #
-# This script only ever touches patches\model-host\.  It never writes to the
-# frozen engine tree (F:\documents\software\languageInput) or to
+# This script only ever touches tools\model-host\.  It never writes to
 # C:\Program Files.  Installing the result is deliberately left to apply.ps1
 # (which needs administrator rights).
 
 [CmdletBinding()]
 param(
-  [string]$EngineRoot = 'F:\documents\software\languageInput',
   [string]$RepositoryRoot,
   [switch]$SkipDependencyInstall,
   [switch]$ForceVenv
@@ -38,7 +40,7 @@ Write-Host 'proxy env cleared for this process (direct connection)'
 if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
   $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 }
-$engineRoot = [IO.Path]::GetFullPath($EngineRoot)
+$repositoryRoot = [IO.Path]::GetFullPath($RepositoryRoot)
 $here = [IO.Path]::GetFullPath($PSScriptRoot)
 $venv = Join-Path $here '.venv'
 $venvPython = Join-Path $venv 'Scripts\python.exe'
@@ -47,9 +49,7 @@ $distRoot = Join-Path $here 'dist'
 $workRoot = Join-Path $buildRoot 'work'
 $specRoot = Join-Path $buildRoot 'spec'
 $pyInstallerCache = Join-Path $buildRoot 'pyinstaller-cache'
-$patchedSource = Join-Path $buildRoot 'src\language_input_model_host.py'
-$frozenSource = Join-Path $engineRoot 'scripts\language_input_model_host.py'
-$patcher = Join-Path $here 'patch_host.py'
+$source = Join-Path $repositoryRoot 'scripts\language_input_model_host.py'
 
 $expectedPackages = @(
   'ctranslate2==4.8.1',
@@ -58,11 +58,8 @@ $expectedPackages = @(
   'pyinstaller==6.15.0'
 )
 
-if (-not (Test-Path -LiteralPath $frozenSource -PathType Leaf)) {
-  throw "Frozen model-host source not found: $frozenSource"
-}
-if (-not (Test-Path -LiteralPath $patcher -PathType Leaf)) {
-  throw "Patcher not found: $patcher"
+if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+  throw "In-tree model-host source not found: $source"
 }
 
 function Get-UvPath {
@@ -134,10 +131,8 @@ foreach ($pkg in $expectedPackages) {
   }
 }
 
-# --- patch ------------------------------------------------------------------
-Write-Host "patching frozen source -> $patchedSource"
-& $venvPython $patcher --source $frozenSource --output $patchedSource
-if ($LASTEXITCODE -ne 0) { throw "patch_host.py failed with exit code $LASTEXITCODE" }
+# --- source -----------------------------------------------------------------
+Write-Host "building in-tree source: $source"
 
 # --- PyInstaller ------------------------------------------------------------
 New-Item -ItemType Directory -Path $distRoot, $workRoot, $specRoot, $pyInstallerCache -Force | Out-Null
@@ -156,7 +151,7 @@ try {
     --collect-binaries ctranslate2 `
     --hidden-import ctranslate2 `
     --hidden-import sentencepiece `
-    $patchedSource
+    $source
   if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE." }
 }
 finally {
@@ -180,10 +175,9 @@ function Get-RelativePathText {
 
 $files = @(Get-ChildItem -LiteralPath $bundle -Recurse -File -Force)
 $manifest = [ordered]@{
-  format                 = 'language-input-model-host-patched-build-v1'
-  frozen_source          = (Get-RelativePathText $RepositoryRoot $frozenSource).Replace('\', '/')
-  frozen_source_sha256   = (Get-FileHash -LiteralPath $frozenSource -Algorithm SHA256).Hash.ToLowerInvariant()
-  patched_source_sha256  = (Get-FileHash -LiteralPath $patchedSource -Algorithm SHA256).Hash.ToLowerInvariant()
+  format                 = 'language-input-model-host-build-v1'
+  source_path            = (Get-RelativePathText $repositoryRoot $source).Replace('\', '/')
+  source_sha256          = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
   environment            = $versions
   bundle_bytes           = ($files | Measure-Object Length -Sum).Sum
   bundle_files           = $files.Count

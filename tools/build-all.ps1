@@ -11,7 +11,7 @@
 
     Order matters:
       1. engine        (tools\build-engine.ps1)        -> engine\output\*
-      2. model host    (patches\model-host\build.ps1)  -> patches\model-host\dist\LanguageInputModelHost\
+      2. model host    (tools\model-host\build.ps1)    -> tools\model-host\dist\LanguageInputModelHost\
       3. settings app  (settings-app\packaging\build.ps1) -> settings-app\dist\LanguageInputSettings\
       4. merged installer                               -> NOT IMPLEMENTED (TODO below)
 
@@ -84,10 +84,10 @@ if ($SkipModelHost) {
     Write-Host '[2/4] model host: skipped (-SkipModelHost)'
 }
 else {
-    # patches\model-host\build.ps1 accepts -EngineRoot and -RepositoryRoot and
-    # NEVER writes into the engine tree; it builds a PyInstaller onedir bundle.
-    $a = @('-EngineRoot', $engine, '-RepositoryRoot', $repo)
-    Invoke-Script -Name '[2/4] model host' -Path (Join-Path $repo 'patches\model-host\build.ps1') -Arguments $a
+    # tools\model-host\build.ps1 builds the in-tree
+    # scripts\language_input_model_host.py into a PyInstaller onedir bundle.
+    $a = @('-RepositoryRoot', $repo)
+    Invoke-Script -Name '[2/4] model host' -Path (Join-Path $repo 'tools\model-host\build.ps1') -Arguments $a
 }
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ and registers/unregisters all of them from a single add/remove-programs entry.
 Inputs that would be combined (all produced by steps 1-3):
   * engine NSIS script : engine\output\install.nsi  (built when build-engine is
                          run with -BuildArgs ...installer; makensis required)
-  * model host bundle  : patches\model-host\dist\LanguageInputModelHost\
+  * model host bundle  : tools\model-host\dist\LanguageInputModelHost\
   * settings app bundle: settings-app\dist\LanguageInputSettings\
 
 Unknowns that must be resolved before this can be written honestly:

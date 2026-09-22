@@ -9,11 +9,11 @@
 |---|---|---|
 | `WeaselTSF/` `WeaselServer/` `WeaselUI/` `WeaselIPC/` `WeaselDeployer/` `WeaselIME/` `WeaselSetup/` `RimeWithWeasel/` `include/` | 引擎（上游 weasel + 本 fork 改动） | TSF 输入法、常驻服务、候选窗、部署器、librime 桥接 |
 | `language-input/` | 本 fork 自有功能 | Rime schema、Lua 译注过滤器、GlossPack、模型目录清单、设计与验证文档 |
-| `scripts/` | 本 fork 自有 | 模型宿主 Python 源码 + 打包/评测脚本 |
-| `patches/` | 本 fork 自有 | `librime` 敏感域补丁、模型宿主性能补丁与其构建/应用/回滚脚本 |
+| `scripts/` | 本 fork 自有 | 模型宿主 Python 源码（`language_input_model_host.py` 由我们在树内直接修改）+ 打包/评测脚本 |
+| `patches/` | 本 fork 自有 | 仅 `librime` 敏感域补丁 `librime/librime-sensitive-mode.patch`；模型宿主性能修复已改为源码内直接修改，不再是补丁 |
 | `librime/` `plum/` | 子模块（上游） | `rime/librime`、`rime/plum`；克隆需 `--recursive` |
 | `settings-app/` | **本项目自研** | PySide6 托盘设置应用（与引擎仅通过注册表/可执行文件对接） |
-| `tools/` | 本项目自研 | 构建编排脚本 |
+| `tools/` | 本项目自研 | 构建编排脚本 + 模型宿主构建/应用/回滚与验证工具（`tools/model-host/`） |
 | `third-party/` `.opencode/` `deps/` `output/` `.cache/` | 本地/外部 | 已忽略；Boost 等构建依赖不入库 |
 
 ## 构建顺序
@@ -21,7 +21,7 @@
 1. `git clone --recursive <repo>` —— 取到 `librime` / `plum` 子模块
 2. 给 `librime` 应用 `patches/` 中的敏感域补丁
 3. 构建引擎 —— 需要 **Visual Studio + CMake + Boost**（`build.bat` / `xbuild.bat`）
-4. 重建模型宿主 —— `patches/model-host/build.ps1`
+4. 重建模型宿主 —— `tools/model-host/build.ps1`（直接从树内 `scripts/language_input_model_host.py` 构建）
 5. 打包设置应用 —— `settings-app/packaging/build.ps1`
 6. 一键编排 —— `tools/build-all.ps1`
 

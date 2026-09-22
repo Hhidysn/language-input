@@ -1,5 +1,5 @@
 # Revert the installed LanguageInputModelHost from the backup created by
-# apply.ps1 (default patches\model-host\backup\original).
+# apply.ps1 (default tools\model-host\backup\original).
 #
 #   * stops WeaselServer.exe (/q)
 #   * restores the backed-up exe + _internal from an elevated child

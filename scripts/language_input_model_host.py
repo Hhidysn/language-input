@@ -492,7 +492,69 @@ def _real_model_root(model_root: Path) -> Path:
     return root
 
 
-def load_installed_component(component_root: Path) -> dict[str, object]:
+_VERIFIED_COMPONENT_CACHE: dict[str, tuple[tuple[object, ...], dict[str, object]]] = {}
+
+
+def _component_stat_token(component_root: Path) -> tuple[object, ...]:
+    """Cheap, content-free fingerprint used to invalidate the verified cache.
+
+    The token combines the root directory mtime with a recursive listing of
+    ``(relative path, size, mtime_ns)`` for every entry below the component.
+    Building it only stats the tree; it never reads file contents, so it is
+    orders of magnitude cheaper than re-hashing ~1.2 GB of model data.
+    """
+    entries: list[tuple[str, int, int]] = []
+    total = 0
+    try:
+        for current, dir_names, file_names in os.walk(component_root):
+            current_path = Path(current)
+            for name in dir_names + file_names:
+                child = current_path / name
+                stat = child.lstat()
+                entries.append(
+                    (
+                        str(child.relative_to(component_root)),
+                        stat.st_size,
+                        stat.st_mtime_ns,
+                    )
+                )
+                total += 1
+        root_stat = component_root.stat()
+    except OSError:
+        return ("unreadable", str(component_root))
+    return (root_stat.st_mtime_ns, total, tuple(sorted(entries)))
+
+
+def _invalidate_component_cache(component_root: Path) -> None:
+    """Explicitly drop a cached verification result for one component."""
+    try:
+        key = str(component_root.resolve(strict=True))
+    except OSError:
+        key = str(component_root)
+    _VERIFIED_COMPONENT_CACHE.pop(key, None)
+
+
+def _cached_load(component_root: Path, loader):
+    """Return a verified component record, re-hashing at most once per process.
+
+    The first call for a component performs the full size + SHA-256 check.  The
+    result is memoised against a cheap stat token; later calls re-stat the tree
+    and only re-verify when the token changed (edit/rename/add/remove).
+    """
+    try:
+        key = str(component_root.resolve(strict=True))
+    except OSError:
+        return loader(component_root)
+    token = _component_stat_token(component_root)
+    cached = _VERIFIED_COMPONENT_CACHE.get(key)
+    if cached is not None and cached[0] == token:
+        return cached[1]
+    record = loader(component_root)
+    _VERIFIED_COMPONENT_CACHE[key] = (token, record)
+    return record
+
+
+def _load_installed_component_uncached(component_root: Path) -> dict[str, object]:
     component_root = component_root.resolve(strict=True)
     if not component_root.is_dir() or component_root.is_symlink():
         raise ValueError("installed component root is invalid")
@@ -515,6 +577,10 @@ def load_installed_component(component_root: Path) -> dict[str, object]:
         if resolved.stat().st_size != row.get("size") or sha256_file(resolved) != row.get("sha256"):
             raise ValueError("installed component file failed verification")
     return record
+
+
+def load_installed_component(component_root: Path) -> dict[str, object]:
+    return _cached_load(component_root, _load_installed_component_uncached)
 
 
 def installed_components(model_root: Path) -> dict[str, dict[str, object]]:
@@ -597,7 +663,7 @@ def install_pack(
             shutil.rmtree(staging)
 
 
-def load_installed_m2m100_component(component_root: Path) -> dict[str, object]:
+def _load_installed_m2m100_component_uncached(component_root: Path) -> dict[str, object]:
     component_root = component_root.resolve(strict=True)
     if not component_root.is_dir() or component_root.is_symlink():
         raise ValueError("installed M2M100 component root is invalid")
@@ -630,6 +696,10 @@ def load_installed_m2m100_component(component_root: Path) -> dict[str, object]:
         if not path.is_file() or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != manifest.get(key):
             raise ValueError("installed M2M100 component license or notice failed verification")
     return record
+
+
+def load_installed_m2m100_component(component_root: Path) -> dict[str, object]:
+    return _cached_load(component_root, _load_installed_m2m100_component_uncached)
 
 
 def installed_m2m100_components(model_root: Path) -> dict[str, dict[str, object]]:
@@ -1177,6 +1247,7 @@ class ModelHostHandler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not-found"})
             return
         self.server.last_request = time.monotonic()
+        quickmt_languages = self.server.quickmt.available_languages()
         m2m100_languages = (
             self.server.m2m100.available_languages() if self.server.m2m100 else []
         )
@@ -1184,9 +1255,9 @@ class ModelHostHandler(BaseHTTPRequestHandler):
             200,
             {
                 "status": "ok",
-                "languages": self.server.quickmt.available_languages(),
+                "languages": quickmt_languages,
                 "models": {
-                    QUICKMT_MODEL_ID: {"languages": self.server.quickmt.available_languages()},
+                    QUICKMT_MODEL_ID: {"languages": quickmt_languages},
                     M2M100_MODEL_ID: {"languages": m2m100_languages},
                 },
             },

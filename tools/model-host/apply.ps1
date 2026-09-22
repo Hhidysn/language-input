@@ -1,6 +1,6 @@
 # Apply the patched LanguageInputModelHost over the installed one.
 #
-#   * backs up the installed exe + _internal (once, to patches\model-host\backup\original)
+#   * backs up the installed exe + _internal (once, to tools\model-host\backup\original)
 #   * stops WeaselServer.exe (/q) before touching Program Files
 #   * performs the Program Files write from an elevated child
 #     (Start-Process -Verb RunAs) -- this is the ONLY step that needs admin

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Unit-level proof of the patched verification cache.
+"""Unit-level proof of the in-tree verification cache.
 
-Imports the *patched* source as a module and drives it with a synthetic
-component in a TEMP directory, counting real ``sha256_file`` calls:
+Imports the in-tree source (``scripts/language_input_model_host.py``) as a
+module and drives it with a synthetic component in a TEMP directory, counting
+real ``sha256_file`` calls:
 
 * first load verifies (hashes once);
 * second load is served from cache (no hashing);
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import Sequence
 
 HERE = Path(__file__).resolve().parent
-PATCHED = HERE.parent / "build" / "src" / "language_input_model_host.py"
+SOURCE = HERE.parent.parent.parent / "scripts" / "language_input_model_host.py"
 WORK = HERE.parent / "build" / "cache-test"
 
 
@@ -68,7 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if WORK.exists():
         shutil.rmtree(WORK)
     WORK.mkdir(parents=True)
-    module = load_module(PATCHED)
+    module = load_module(SOURCE)
 
     calls = {"count": 0}
     original_sha256_file = module.sha256_file
