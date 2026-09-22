@@ -1,0 +1,58 @@
+{
+  "valid": {
+    "current": {
+      "exit": 0,
+      "present": true
+    },
+    "patched": {
+      "exit": 0,
+      "present": true
+    }
+  },
+  "corrupted": {
+    "current": {
+      "exit": 0,
+      "present": false
+    },
+    "patched": {
+      "exit": 0,
+      "present": false
+    }
+  },
+  "oversized": {
+    "current": {
+      "exit": 0,
+      "present": false
+    },
+    "patched": {
+      "exit": 0,
+      "present": false
+    }
+  },
+  "missing": {
+    "current": {
+      "exit": 0,
+      "present": false
+    },
+    "patched": {
+      "exit": 0,
+      "present": false
+    }
+  },
+  "health_corrupted": {
+    "status": 200,
+    "json": {
+      "status": "ok",
+      "languages": [],
+      "models": {
+        "quickmt-gloss-route-v2": {
+          "languages": []
+        },
+        "m2m100-418m-int8": {
+          "languages": []
+        }
+      }
+    }
+  },
+  "ok": true
+}

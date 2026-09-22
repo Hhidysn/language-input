@@ -375,3 +375,4 @@ QuickMT 三件套 ≈ 1.22GB；M2M100 ≈ 500MB。
 | 23 | **GLM 第三方审阅**（独立模型，审阅当前 tree） | ✅ 完成。B1–B4 / S1–S8 / N1–N4 **全部 CONFIRMED 并已修复**；无 NOT-REPRODUCED 项（§0「GLM 审阅处置」） |
 | 24 | ~~**D1（暂缓，不实施）**：实机事务阻塞 Qt 主线程~~ → **已实施**：`QThread` + signal/slot，worker 不碰 `QWidget`；各页共享 busy 进度呈现 | ✅ 已完成（R26） |
 | 25 | 行尾统一 **LF**（不再保留 CRLF）；移除 `.gitattributes` 的 PowerShell CRLF 例外 | ✅ 已定并落地 |
+| 26 | **本地模型宿主性能补丁**（`patches/model-host/`）：按进程缓存组件完整性校验（首次使用做完整 size+SHA256，之后仅 stat 令牌失效检查）、修复 `/health` 双哈希。热请求中位 **994.5 ms → 27.1 ms**、`/health` **1 944.9 ms → 5.6 ms**；zh→en/ja/es 响应字节级一致、损坏/超限/缺失组件仍被拒（首次使用时）；`--list/--audit-pack/--import-pack` 输出一致。**不改冻结树**；安装到 Program Files 需管理员权限，刻意不在仓库内自动化 | ✅ 已完成并实测（详见 `patches/model-host/README.md`） |

@@ -1,0 +1,17 @@
+{
+    "format":  "language-input-model-host-patched-build-v1",
+    "frozen_source":  "../languageInput/scripts/language_input_model_host.py",
+    "frozen_source_sha256":  "6d4b2ad20abce3a4a95a5d355bad8640517a79486cf6c69e007989ce84c0c7f0",
+    "patched_source_sha256":  "7b521ed905fad967be30c9f8a981fd89d9a59ab7fe8b4d351a7512dcc8ba028a",
+    "environment":  {
+                        "architecture":  "amd64",
+                        "ctranslate2":  "4.8.1",
+                        "numpy":  "2.4.6",
+                        "pyinstaller":  "6.15.0",
+                        "python":  "3.11.15",
+                        "sentencepiece":  "0.2.1"
+                    },
+    "bundle_bytes":  115368983,
+    "bundle_files":  69,
+    "executable_sha256":  "05ae6b43e4d94f36fd6b3ae47acb6967d27eb4bc00360f791f58f7c8a0a15a80"
+}
