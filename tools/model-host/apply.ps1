@@ -23,6 +23,7 @@ param(
   [switch]$DryRun,
   [switch]$Force,
   [switch]$SkipServerRestart,
+  [string]$LogPath,  # internal: transcript path written by the elevated child
   [switch]$Elevated  # internal: set on the elevated child
 )
 
@@ -151,6 +152,13 @@ if ($DryRun -and -not $Elevated) {
 
 if ($Elevated) {
   # We are the elevated child: only touch Program Files, never the server.
+  # Start-Process -Verb RunAs cannot redirect stdout, so record a transcript;
+  # the parent prints it when this child fails, otherwise a failure is just
+  # "exit code 1" with no explanation.
+  if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+    try { Start-Transcript -Path $LogPath -Force | Out-Null } catch { }
+  }
+  try {
   if (-not (Test-Path -LiteralPath $backupExe -PathType Leaf)) {
     Write-Host "[elevated] creating backup directory $BackupRoot"
     New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
@@ -180,6 +188,12 @@ if ($Elevated) {
   if ($newHash -ne $sourceHash) {
     throw "[elevated] verification failed: installed exe sha256 $newHash != $sourceHash"
   }
+  }
+  finally {
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+      try { Stop-Transcript | Out-Null } catch { }
+    }
+  }
   return
 }
 
@@ -200,15 +214,36 @@ if (-not $SkipServerRestart -and $serverWasRunning) {
 }
 
 try {
-  $arguments = @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
-    '-Elevated', '-InstallRoot', $InstallRoot, '-SourceBundle', $SourceBundle, '-BackupRoot', $BackupRoot
+  # BUGFIX: Start-Process joins an -ArgumentList ARRAY with spaces and does NOT
+  # quote the elements, so any value containing a space (e.g.
+  # "C:\Program Files\Rime\weasel-0.1.0") got split into two argv entries and
+  # the elevated child aborted with exit code 1 before writing anything.
+  # Build one explicitly quoted argument string instead.
+  $quote = { param([string]$v) '"' + $v + '"' }
+  $elevatedLog = Join-Path $here 'apply-elevated.log'
+  if (Test-Path -LiteralPath $elevatedLog) {
+    Remove-Item -LiteralPath $elevatedLog -Force -ErrorAction SilentlyContinue
+  }
+  $parts = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass',
+    '-File', (& $quote $PSCommandPath),
+    '-Elevated',
+    '-InstallRoot', (& $quote $InstallRoot),
+    '-SourceBundle', (& $quote $SourceBundle),
+    '-BackupRoot', (& $quote $BackupRoot),
+    '-LogPath', (& $quote $elevatedLog)
   )
-  if ($Force) { $arguments += '-Force' }
+  if ($Force) { $parts += '-Force' }
+  $argumentLine = $parts -join ' '
   Write-Host '[user] elevating to write Program Files (Start-Process -Verb RunAs)'
-  $child = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList $arguments
+  Write-Host "[user] elevated child log: $elevatedLog"
+  $child = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList $argumentLine
   if ($child.ExitCode -ne 0) {
-    throw "elevated copy failed with exit code $($child.ExitCode)"
+    $childOutput = if (Test-Path -LiteralPath $elevatedLog) {
+      (Get-Content -LiteralPath $elevatedLog -Raw)
+    }
+    else { '(the elevated child produced no log)' }
+    throw "elevated copy failed with exit code $($child.ExitCode)`n----- elevated child output -----`n$childOutput`n--------------------------------"
   }
   Write-Host '[user] elevated copy completed'
 }
