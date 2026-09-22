@@ -82,3 +82,7 @@ tools/model-host/backup/
 tools/model-host/harness/results/
 *.bak-*
 *.part
+# ---- engine swap tooling ----
+tools/engine/backup/
+tools/engine/*.log
+WeaselServer.exe.aside-*
