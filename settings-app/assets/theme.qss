@@ -484,6 +484,19 @@ QComboBox QAbstractItemView {
     outline: none;
 }
 
+/* --- progress (BusyStrip) -------------------------------------------------- */
+
+QProgressBar {
+    background-color: #E3E6EA;
+    border: 1px solid #E3E6EA;
+    border-radius: 6px;
+}
+
+QProgressBar::chunk {
+    background-color: #2F6FEB;
+    border-radius: 4px;
+}
+
 /* --- tables --------------------------------------------------------------- */
 
 QTableWidget,

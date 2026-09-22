@@ -71,7 +71,7 @@ PAGE_SPECS = [
         "models",
         "模型",
         "Models",
-        "查看模型包、大小、安装状态与适用语言；下载 / 安装请使用命令行。",
+        "查看模型包、大小、安装状态与适用语言；支持下载 / 安装 / 校验所选组件。",
     ),
     (
         "dictionary",
@@ -126,15 +126,9 @@ SCHEMA_LABELS = {
     "language_input_flypy": "小鹤双拼方案",
     "language_input_pinyin": "全拼方案",
 }
-SWITCH_LABELS = {
-    "language_input_gloss": "总注释开关",
-    "language_input_ai": "AI 翻译",
-    "language_input_model_m2m100": "翻译模型（多语直译）",
-    "language_input_speech": "语音",
-    "language_input_en": "英语",
-    "language_input_ja": "日语",
-    "language_input_es": "西班牙语",
-}
+# Switch labels are NOT duplicated here: ``rime_settings.SWITCH_LABELS`` is the
+# single source of truth so the same switch never appears under two names on
+# different surfaces (see ``switch_label`` below).
 
 
 def backend_label(value: str | None) -> str:
@@ -161,8 +155,13 @@ def component_label(component_id: str, display_name: str | None = None) -> str:
 
 
 def switch_label(name: str) -> str:
-    """Human label for a schema switch key."""
-    return SWITCH_LABELS.get(name, "选项")
+    """Human label for a schema switch key.
+
+    Delegates to :data:`rime_settings.SWITCH_LABELS` — the single source of
+    truth shared by every surface — so a switch is never rendered under two
+    different names.
+    """
+    return rime_settings.SWITCH_LABELS.get(name, "选项")
 
 
 def format_size(value: int | None) -> str:
@@ -226,6 +225,7 @@ try:  # pragma: no cover - exercised by the smoke test
         QButtonGroup,
         QCheckBox,
         QComboBox,
+        QFileDialog,
         QFormLayout,
         QFrame,
         QGridLayout,
@@ -710,12 +710,26 @@ if _HAS_QT:
             else:
                 self.finished.emit(result)
 
-    class BusyStrip(QWidget):
-        """Shared indeterminate progress bar + status line for a transaction.
+    class ProgressBridge(QObject):
+        """Marshals a worker-thread progress callback onto the GUI thread.
 
-        Hidden while idle.  The bar never shows a percentage: the underlying
-        stop/poll/start transaction has no meaningful progress fraction, so an
-        indeterminate bar plus a human status line is the honest presentation.
+        Model downloads report progress from the worker thread; ``Signal.emit``
+        is thread-safe, so the callback only emits and the connected slot
+        (running on the main thread) is the only thing that touches a widget.
+        """
+
+        updated = Signal(object, object)  # (current, total)
+
+        def report(self, current, total=None, _path=None) -> None:
+            self.updated.emit(current, total)
+
+    class BusyStrip(QWidget):
+        """Shared progress bar + status line for a transaction.
+
+        Hidden while idle.  Stop/start transactions have no meaningful progress
+        fraction, so they use an indeterminate bar plus a human status line.
+        A download has a real fraction, so it switches the bar to a determinate
+        0–100 range via :meth:`set_progress`.
         """
 
         def __init__(self, parent=None) -> None:
@@ -736,13 +750,29 @@ if _HAS_QT:
             row.addWidget(self.label, 1)
             self.setVisible(False)
 
-        def start(self, text: str) -> None:
+        def start(self, text: str, determinate: bool = False) -> None:
             self.label.setText(text)
-            self.bar.setRange(0, 0)
+            if determinate:
+                self.bar.setRange(0, 100)
+                self.bar.setValue(0)
+            else:
+                self.bar.setRange(0, 0)
             self.setVisible(True)
+
+        def set_progress(self, current, total=None) -> None:
+            """Switch to a determinate bar and show ``current / total``."""
+            if total is None or total <= 0:
+                if self.bar.maximum() != 0:
+                    self.bar.setRange(0, 0)
+                return
+            if self.bar.maximum() != 100:
+                self.bar.setRange(0, 100)
+            value = int(float(current) * 100.0 / float(total))
+            self.bar.setValue(max(0, min(100, value)))
 
         def stop(self) -> None:
             self.bar.setRange(0, 1)
+            self.bar.setValue(0)
             self.setVisible(False)
 
     class TransactionController(QObject):
@@ -768,6 +798,7 @@ if _HAS_QT:
             self._active = False
             self._callbacks: tuple | None = None
             self._active_busy = busy
+            self._active_determinate = False
 
         @property
         def active(self) -> bool:
@@ -781,15 +812,21 @@ if _HAS_QT:
             on_success,
             on_error,
             busy: "BusyStrip | None" = None,
+            determinate: bool = False,
             **kwargs,
         ) -> bool:
-            """Start ``func(**kwargs)`` off-thread; return False if already busy."""
+            """Start ``func(**kwargs)`` off-thread; return False if already busy.
+
+            ``determinate=True`` starts the busy bar as a determinate 0–100 bar
+            so a progress callback can drive it.
+            """
             if self._active:
                 return False
             self._active = True
             self._callbacks = (on_success, on_error)
             self._active_busy = busy or self._busy
-            self._active_busy.start(status)
+            self._active_determinate = bool(determinate)
+            self._active_busy.start(status, self._active_determinate)
             self._set_controls(False)
 
             thread = QThread()
@@ -813,7 +850,7 @@ if _HAS_QT:
 
         @Slot(str)
         def _on_started(self, status: str) -> None:
-            self._active_busy.start(status)
+            self._active_busy.start(status, self._active_determinate)
 
         @Slot(object)
         def _on_finished(self, result: object) -> None:
@@ -1098,10 +1135,11 @@ if _HAS_QT:
         return card
 
     class ModelsPage(QWidget):
-        """The 模型 page: a real table of components, status chips and actions.
+        """The 模型 page: component table, status chips and real actions.
 
-        No network activity happens from the GUI: downloading / installing is
-        done through the ``--models-*`` command line.
+        Every action that touches the network or the model root (download,
+        install, verify) runs through the shared :class:`TransactionController`
+        (off the GUI thread); a download drives the determinate busy bar.
         """
 
         def __init__(self, title: str, description: str) -> None:
@@ -1111,6 +1149,8 @@ if _HAS_QT:
             layout.setContentsMargins(24, 24, 24, 24)
             layout.setSpacing(12)
             layout.addWidget(_page_header(title, description))
+
+            self._rows: list[str] = []  # table row index -> component id
 
             actions = QHBoxLayout()
             actions.setSpacing(8)
@@ -1123,6 +1163,60 @@ if _HAS_QT:
             self.open_button.clicked.connect(self._open_model_root)
             actions.addWidget(self.open_button)
             layout.addLayout(actions)
+
+            action_card = Card()
+            action_heading = QLabel("组件操作")
+            action_heading.setObjectName("SectionHeading")
+            action_card.body.addWidget(action_heading)
+            action_card.body.addWidget(
+                _caption_label(
+                    "先在下方表格选择一行，再执行操作。下载与安装会写入模型目录；"
+                    "安装会重启输入法服务（期间无法打字）。"
+                )
+            )
+            self.selection_label = QLabel("未选择组件")
+            self.selection_label.setObjectName("CardHint")
+            self.selection_label.setWordWrap(True)
+            action_card.body.addWidget(self.selection_label)
+
+            button_row = QHBoxLayout()
+            button_row.setSpacing(8)
+            self.download_button = QPushButton("下载")
+            self.download_button.setObjectName("PrimaryButton")
+            self.download_button.clicked.connect(self._on_download)
+            button_row.addWidget(self.download_button)
+            self.install_dir_button = QPushButton("从目录安装…")
+            self.install_dir_button.clicked.connect(self._on_install_from_dir)
+            button_row.addWidget(self.install_dir_button)
+            self.install_pack_button = QPushButton("从模型包安装…")
+            self.install_pack_button.setToolTip(
+                "选择与本应用目录匹配的已验证模型包文件（.limodel），"
+                "经冻结的模型宿主导入。"
+            )
+            self.install_pack_button.clicked.connect(self._on_install_from_limodel)
+            button_row.addWidget(self.install_pack_button)
+            self.verify_button = QPushButton("校验")
+            self.verify_button.clicked.connect(self._on_verify)
+            button_row.addWidget(self.verify_button)
+            button_row.addStretch(1)
+            action_card.body.addLayout(button_row)
+
+            self.replace_check = QCheckBox("安装时替换已存在的组件")
+            self.replace_check.setToolTip(
+                "已安装组件支持替换（复用备份/交换/回滚安装事务）。"
+                "本应用刻意不提供「删除已安装组件」：安装层没有经过验证的"
+                "安全移除接口，替换是受支持的路径。"
+            )
+            action_card.body.addWidget(self.replace_check)
+
+            self.action_strip = QLabel("")
+            self.action_strip.setObjectName("StatusStrip")
+            self.action_strip.setWordWrap(True)
+            action_card.body.addWidget(self.action_strip)
+
+            self.busy = BusyStrip()
+            action_card.body.addWidget(self.busy)
+            layout.addWidget(action_card)
 
             self.strip = QLabel("")
             self.strip.setObjectName("StatusStrip")
@@ -1146,6 +1240,7 @@ if _HAS_QT:
             header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
             header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
             header.setSectionResizeMode(3, QHeaderView.Stretch)
+            self.table.itemSelectionChanged.connect(self._on_selection_changed)
             layout.addWidget(self.table, 1)
 
             routes_card = Card()
@@ -1170,7 +1265,31 @@ if _HAS_QT:
             layout.addWidget(details)
             layout.addStretch(1)
 
+            self._progress = ProgressBridge(self)
+            self._progress.updated.connect(self._on_download_progress)
+
             self._reload()
+
+            self._tx = TransactionController(
+                self.busy, self._interactive_controls, parent=self
+            )
+
+        # -- off-thread transaction support --
+
+        def _interactive_controls(self):
+            return [
+                self.refresh_button,
+                self.open_button,
+                self.download_button,
+                self.install_dir_button,
+                self.install_pack_button,
+                self.verify_button,
+                self.replace_check,
+                self.table,
+            ]
+
+        def transaction_active(self) -> bool:
+            return self._tx.active
 
         # -- helpers --
 
@@ -1190,7 +1309,7 @@ if _HAS_QT:
                     self.strip,
                     "neutral",
                     f"共 {len(components)} 个组件，已安装 {len(installed)} 个。"
-                    "下载 / 安装请使用命令行。",
+                    "选择一行后使用上方的「下载 / 安装 / 校验」操作。",
                 )
 
             self.open_button.setEnabled(bool(model_root and model_root.is_dir()))
@@ -1200,6 +1319,7 @@ if _HAS_QT:
                 key=lambda item: component_label(item[0], item[1].display_name),
             )
             self.table.setRowCount(len(rows))
+            self._rows = [component_id for component_id, _component in rows]
             detail_lines: list[str] = []
             for row, (component_id, component) in enumerate(rows):
                 is_installed = component_id in installed
@@ -1249,6 +1369,7 @@ if _HAS_QT:
             self._detail_label.setText("\n".join(detail_lines) or "（无组件）")
 
             self._reload_routes(models_catalog, installed, model_root)
+            self._on_selection_changed()
 
         @staticmethod
         def _languages_for(component) -> str:
@@ -1299,6 +1420,285 @@ if _HAS_QT:
                 os.startfile(str(model_root))  # type: ignore[attr-defined]
             except Exception as exc:  # pragma: no cover - defensive
                 _update_strip(self.strip, "error", f"无法打开模型目录：{exc}")
+
+        # -- selection-driven actions --
+
+        def _selected_id(self) -> str | None:
+            model = self.table.selectionModel()
+            if model is None:
+                return None
+            indexes = model.selectedRows()
+            if not indexes:
+                return None
+            row = indexes[0].row()
+            if 0 <= row < len(self._rows):
+                return self._rows[row]
+            return None
+
+        def _selected_component(self):
+            from . import models_catalog
+
+            component_id = self._selected_id()
+            if component_id is None:
+                return None
+            return models_catalog.load_components().get(component_id)
+
+        def _is_installed(self, component_id: str) -> bool:
+            model_root = paths.model_root(paths.rime_user_dir())
+            return bool(model_root and (model_root / component_id).is_dir())
+
+        def _on_selection_changed(self, *_args) -> None:
+            component_id = self._selected_id()
+            has_selection = component_id is not None
+            self.download_button.setEnabled(has_selection)
+            self.install_dir_button.setEnabled(has_selection)
+            self.install_pack_button.setEnabled(has_selection)
+            self.verify_button.setEnabled(
+                bool(component_id) and self._is_installed(component_id)
+            )
+            if not has_selection:
+                self.selection_label.setText("未选择组件")
+                return
+            component = self._selected_component()
+            if component is None:
+                self.selection_label.setText("已选择组件（信息不可用）")
+                return
+            deps = (
+                "、".join(component_label(dep) for dep in component.requires) or "无"
+            )
+            self.selection_label.setText(
+                f"已选择：{component_label(component_id, component.display_name)}"
+                f"　依赖：{deps}"
+            )
+
+        def _on_download_progress(self, current, total) -> None:
+            self.busy.set_progress(current, total)
+
+        def _on_download(self) -> None:
+            component = self._selected_component()
+            if component is None:
+                return
+            model_root = paths.model_root(paths.rime_user_dir())
+            if model_root is None:
+                _update_strip(self.action_strip, "warning", "无法解析模型目录。")
+                return
+            from . import models_catalog, models_download
+
+            sources = models_catalog.download_metadata()
+            dest = model_root / f".sources-{component.component_id}"
+            size_value = (
+                component.file_size
+                if component.file_size is not None
+                else component.runtime_bytes
+            )
+            label = component_label(component.component_id, component.display_name)
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认下载",
+                    f"从网络下载「{label}」（约 {format_size(size_value)}）到暂存目录？\n"
+                    "下载完成后可用「从目录安装…」安装该暂存目录。",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
+
+            def _job(*, component, dest, sources):
+                return models_download.download_component(
+                    component, dest, sources=sources, progress=self._progress.report
+                )
+
+            self._tx.run(
+                f"正在下载「{label}」…",
+                _job,
+                component=component,
+                dest=dest,
+                sources=sources,
+                determinate=True,
+                on_success=lambda result: self._on_download_done(label, result),
+                on_error=self._on_action_error,
+            )
+
+        def _on_download_done(self, label: str, result: dict) -> None:
+            self._reload()
+            if result.get("error"):
+                _update_strip(
+                    self.action_strip,
+                    "error",
+                    f"「{label}」下载未完成：{result['error']}",
+                )
+                return
+            _update_strip(
+                self.action_strip,
+                "success",
+                f"「{label}」已下载到暂存目录（{format_size(result.get('total_bytes'))}）。",
+            )
+
+        def _confirm_install(self, component, action_label: str) -> bool:
+            label = component_label(component.component_id, component.display_name)
+            installed: set[str] = set()
+            try:
+                from . import models_catalog
+
+                model_root = paths.model_root(paths.rime_user_dir())
+                installed = set(models_catalog.installed_ids(model_root))
+            except Exception:  # pragma: no cover - defensive
+                installed = set()
+            missing = [dep for dep in component.requires if dep not in installed]
+            deps = "、".join(component_label(dep) for dep in component.requires) or "无"
+            body = (
+                f"{action_label}「{label}」。\n"
+                f"依赖：{deps}\n"
+                f"{_RESTART_WARNING}"
+            )
+            if missing:
+                missing_text = "、".join(component_label(dep) for dep in missing)
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Warning)
+                box.setWindowTitle("缺少依赖")
+                box.setText(
+                    f"缺少依赖组件：{missing_text}。\n继续安装可能失败。\n\n{body}"
+                )
+                box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                box.setDefaultButton(QMessageBox.No)
+                return box.exec() == QMessageBox.Yes
+            return (
+                QMessageBox.question(
+                    self,
+                    "确认安装",
+                    body,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                == QMessageBox.Yes
+            )
+
+        def _on_install_from_dir(self) -> None:
+            component = self._selected_component()
+            if component is None:
+                return
+            source = QFileDialog.getExistingDirectory(
+                self, "选择包含模型源文件的目录"
+            )
+            if not source:
+                return
+            model_root = paths.model_root(paths.rime_user_dir())
+            if model_root is None:
+                _update_strip(self.action_strip, "warning", "无法解析模型目录。")
+                return
+            if not self._confirm_install(component, "从目录安装"):
+                return
+            from . import models_install
+
+            label = component_label(component.component_id, component.display_name)
+            self._tx.run(
+                f"正在安装「{label}」…",
+                models_install.install_from_dir,
+                component=component,
+                files_dir=source,
+                model_root=model_root,
+                replace=self.replace_check.isChecked(),
+                on_success=lambda result: self._on_install_done(label, result),
+                on_error=self._on_action_error,
+            )
+
+        def _on_install_from_limodel(self) -> None:
+            component = self._selected_component()
+            if component is None:
+                return
+            pack, _selected_filter = QFileDialog.getOpenFileName(
+                self,
+                "选择模型包文件",
+                "",
+                "模型包 (*.limodel);;所有文件 (*)",
+            )
+            if not pack:
+                return
+            model_root = paths.model_root(paths.rime_user_dir())
+            if model_root is None:
+                _update_strip(self.action_strip, "warning", "无法解析模型目录。")
+                return
+            if not self._confirm_install(component, "导入"):
+                return
+            from . import models_install
+
+            label = component_label(component.component_id, component.display_name)
+            self._tx.run(
+                f"正在导入「{label}」…",
+                models_install.install_from_limodel,
+                pack_path=pack,
+                model_root=model_root,
+                replace=self.replace_check.isChecked(),
+                m2m100=(component.backend == "m2m100"),
+                on_success=lambda result: self._on_install_done(label, result),
+                on_error=self._on_action_error,
+            )
+
+        def _on_install_done(self, label: str, result: dict) -> None:
+            self._reload()
+            if result.get("error"):
+                _update_strip(
+                    self.action_strip,
+                    "error",
+                    f"「{label}」安装未完成：{result['error']}",
+                )
+                return
+            verification = result.get("verification") or {}
+            if verification and not verification.get("ok"):
+                errors = "；".join(verification.get("errors") or []) or "校验不一致"
+                _update_strip(
+                    self.action_strip,
+                    "error",
+                    f"「{label}」安装后校验未通过：{errors}",
+                )
+                return
+            _update_strip(self.action_strip, "success", f"「{label}」已安装。")
+
+        def _on_verify(self) -> None:
+            component = self._selected_component()
+            if component is None:
+                return
+            model_root = paths.model_root(paths.rime_user_dir())
+            if model_root is None:
+                _update_strip(self.action_strip, "warning", "无法解析模型目录。")
+                return
+            component_root = model_root / component.component_id
+            if not component_root.is_dir():
+                _update_strip(
+                    self.action_strip, "warning", "该组件尚未安装，无法校验。"
+                )
+                return
+            from . import models_install
+
+            label = component_label(component.component_id, component.display_name)
+            self._tx.run(
+                f"正在校验「{label}」…",
+                models_install.verify_installed_component,
+                component_root=component_root,
+                on_success=lambda result: self._on_verify_done(label, result),
+                on_error=self._on_action_error,
+            )
+
+        def _on_verify_done(self, label: str, result: dict) -> None:
+            files = result.get("files") or []
+            if result.get("ok"):
+                _update_strip(
+                    self.action_strip,
+                    "success",
+                    f"「{label}」校验通过（{len(files)} 个文件）。",
+                )
+            else:
+                errors = "；".join(result.get("errors") or []) or "文件大小/哈希不一致"
+                _update_strip(
+                    self.action_strip, "error", f"「{label}」校验未通过：{errors}"
+                )
+
+        def _on_action_error(self, message: str) -> None:
+            self._reload()
+            _update_strip(self.action_strip, "error", f"操作失败：{message}")
+            QMessageBox.critical(self, "操作失败", message)
 
     class TranslationPage(QWidget):
         """翻译 page (M2): pick and apply the translation backend.
@@ -1382,6 +1782,18 @@ if _HAS_QT:
             form.addRow("模型", self.model_edit)
             form.addRow("目标语言", self.language_combo)
             form_card.body.addLayout(form)
+
+            test_row = QHBoxLayout()
+            test_row.setSpacing(8)
+            self.test_button = QPushButton("测试端点连通性")
+            self.test_button.setToolTip(
+                "向端点发送一次最小请求（8 秒超时、不重试），报告成功与否、"
+                "延迟与错误文本。密钥仅随请求头发送，绝不显示或记录。"
+            )
+            self.test_button.clicked.connect(self._on_test_endpoint)
+            test_row.addWidget(self.test_button)
+            test_row.addStretch(1)
+            form_card.body.addLayout(test_row)
             layout.addWidget(form_card)
 
             # -- page-level primary action (kept outside the API card so it is
@@ -1461,6 +1873,7 @@ if _HAS_QT:
         def _interactive_controls(self):
             controls = [
                 self.apply_button,
+                self.test_button,
                 self.plain_badge_check,
                 self.badge_refresh_button,
                 self.url_edit,
@@ -1655,6 +2068,69 @@ if _HAS_QT:
             QMessageBox.critical(self, "简洁译注失败", message)
 
         # -- actions --
+
+        def _on_test_endpoint(self) -> None:
+            """One minimal request to the configured endpoint (off-thread).
+
+            The request never retries, honours the app's ``allow_http`` /
+            ``use_system_proxy`` network policy, uses a short timeout, and the
+            API key only ever travels in the ``Authorization`` header (it is
+            redacted from anything the result reports).
+            """
+            url = self.url_edit.text().strip()
+            if not url:
+                _update_strip(self.apply_strip, "error", "请先填写端点 URL。")
+                return
+            api_key = self.api_key_edit.text() or None
+            model = self.model_edit.text().strip() or None
+            language = self.language_combo.currentData() or self.language_combo.currentText()
+
+            from . import models_catalog, remote_probe
+
+            metadata = models_catalog.download_metadata()
+            allow_http = bool(metadata.get("allow_http", False))
+            use_system_proxy = bool(metadata.get("use_system_proxy", False))
+
+            def _job():
+                return remote_probe.test_endpoint(
+                    url,
+                    api_key=api_key,
+                    model=model,
+                    language=language,
+                    allow_http=allow_http,
+                    use_system_proxy=use_system_proxy,
+                )
+
+            self._tx.run(
+                "正在测试端点连通性…",
+                _job,
+                on_success=self._on_test_done,
+                on_error=self._on_test_error,
+            )
+
+        def _on_test_done(self, result: dict) -> None:
+            latency = result.get("latency_ms")
+            latency_text = f"{latency} ms" if latency is not None else "-"
+            if result.get("ok"):
+                text = f"端点连通正常（HTTP {result.get('status')}，用时 {latency_text}）。"
+                _update_strip(self.apply_strip, "success", text)
+                QMessageBox.information(self, "连通性测试", text)
+            else:
+                error = result.get("error") or "未知错误"
+                detail = (result.get("detail") or "").strip()
+                _update_strip(
+                    self.apply_strip,
+                    "error",
+                    f"端点测试失败：{error}（用时 {latency_text}）",
+                )
+                message = f"端点测试失败：{error}\n用时：{latency_text}"
+                if detail:
+                    message += f"\n\n响应摘要：\n{detail[:400]}"
+                QMessageBox.warning(self, "连通性测试", message)
+
+        def _on_test_error(self, message: str) -> None:
+            _update_strip(self.apply_strip, "error", f"端点测试失败：{message}")
+            QMessageBox.critical(self, "连通性测试", message)
 
         def _on_apply(self) -> None:
             backend = self._selected_backend()
@@ -2102,15 +2578,17 @@ if _HAS_QT:
                 self.schema_combo.addItem(
                     SCHEMA_LABELS.get(schema_id, schema_id), schema_id
                 )
+            # The combo is the single refresh trigger for this read-only view:
+            # switching schema re-reads its reset state, so a dedicated 刷新
+            # button would duplicate exactly the same action.
             self.schema_combo.currentIndexChanged.connect(self._refresh_reset)
             reset_row.addWidget(self.schema_combo)
             self.neutralize_button = QPushButton("使选项可保持")
             self.neutralize_button.clicked.connect(self._on_neutralize)
             reset_row.addWidget(self.neutralize_button)
-            reset_button = QPushButton("刷新")
-            reset_button.clicked.connect(self._refresh_reset)
-            reset_row.addWidget(reset_button)
-            self.reset_button = reset_button
+            self.revert_button = QPushButton("还原重置补丁")
+            self.revert_button.clicked.connect(self._on_revert)
+            reset_row.addWidget(self.revert_button)
             reset_row.addStretch(1)
             advanced.addLayout(reset_row)
             self.reset_label = QLabel("")
@@ -2135,7 +2613,7 @@ if _HAS_QT:
 
         def _interactive_controls(self):
             controls = [self.refresh_button, self.apply_button, self.schema_combo,
-                        self.neutralize_button, self.reset_button]
+                        self.neutralize_button, self.revert_button]
             controls.extend(self._checkboxes.values())
             controls.extend(self._radios.values())
             return controls
@@ -2381,6 +2859,70 @@ if _HAS_QT:
         def _on_neutralize_error(self, display: str, message: str) -> None:
             QMessageBox.critical(self, "失败", f"{display}：{message}")
 
+        def _on_revert(self) -> None:
+            """GUI 回退：remove our reset patch (previously CLI-only)."""
+            schema_id = self.schema_combo.currentData() or self.schema_combo.currentText()
+            display = SCHEMA_LABELS.get(schema_id, schema_id)
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认还原",
+                    f"将移除 {display} 中本应用写入的开关重置补丁，"
+                    "恢复方案自带的 reset 行为（重开会话后所选选项会被重置），"
+                    "并重新部署。\n\n"
+                    f"{_RESTART_WARNING}",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
+
+            def _job(*, schema_id: str) -> dict:
+                from . import deploy, schema_patch
+
+                path = schema_patch.revert_resets(schema_id)
+                deployer = paths.weasel_deployer_exe(paths.weasel_root())
+                result = deploy.run_deploy(deployer, timeout=120)
+                return {
+                    "path": str(path) if path else None,
+                    "exit_code": result.exit_code,
+                    "busy": result.busy,
+                    "stderr": result.stderr,
+                    "timed_out": result.timed_out,
+                    # /deploy returns 0 even for invalid YAML: clean requires
+                    # an empty stderr (design doc §5.6).
+                    "clean": bool(result.ran)
+                    and result.exit_code == 0
+                    and not (result.stderr or "").strip(),
+                }
+
+            self._tx.run(
+                "正在移除补丁并重新部署…",
+                _job,
+                schema_id=schema_id,
+                on_success=self._on_revert_done,
+                on_error=lambda message: self._on_revert_error(display, message),
+            )
+
+        def _on_revert_done(self, result: dict) -> None:
+            self._refresh_reset()
+            self._refresh()
+            if result.get("clean"):
+                _update_strip(self.strip, "success", "已还原方案重置补丁并重新部署。")
+                QMessageBox.information(self, "结果", "重置补丁已还原，已重新部署。")
+            else:
+                _update_strip(
+                    self.strip,
+                    "warning" if result.get("busy") else "error",
+                    "还原可能未完成："
+                    f"退出码 {result.get('exit_code')}，"
+                    f"stderr：{result.get('stderr') or '（空）'}",
+                )
+
+        def _on_revert_error(self, display: str, message: str) -> None:
+            QMessageBox.critical(self, "失败", f"{display}：{message}")
+
     class DictionaryPage(QWidget):
         """词库与记忆 page: learning toggle, user-dictionary state, sync, /dict."""
 
@@ -2408,9 +2950,10 @@ if _HAS_QT:
             warning_style.polish(warning)
             learning_card.body.addWidget(warning)
 
-            self.learning_check = QCheckBox("启用用户词典学习（默认开启）")
+            self.learning_check = QCheckBox("启用用户词典（关闭会同时停用学习与已学词条）")
             self.learning_check.setToolTip(
-                "写入 translator/enable_user_dict；关闭会同时停用对已学词条的使用。"
+                "写入 translator/enable_user_dict；关闭不仅停止学习新词，"
+                "也会停止使用已学词条（已学词不再参与候选排序）。"
             )
             learning_card.body.addWidget(self.learning_check)
 
@@ -2549,11 +3092,20 @@ if _HAS_QT:
 
         def _on_apply_learning(self) -> None:
             on = self.learning_check.isChecked()
+            if on:
+                semantics = (
+                    "开启用户词典学习：已学词条恢复参与候选排序，并继续学习新词。"
+                )
+            else:
+                semantics = (
+                    "关闭用户词典会完全停用用户词典：不仅停止学习新词，"
+                    "也会停止使用已学词条（已学词不再参与候选排序）。"
+                )
             if (
                 QMessageBox.question(
                     self,
                     "确认应用",
-                    _RESTART_WARNING,
+                    f"{semantics}\n\n{_RESTART_WARNING}",
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No,
                 )
@@ -2728,6 +3280,7 @@ if _HAS_QT:
             self.busy = BusyStrip()
             action_card.body.addWidget(self.busy)
             row = QHBoxLayout()
+            row.setSpacing(8)
             self.redeploy_button = QPushButton("重新部署")
             self.redeploy_button.setObjectName("PrimaryButton")
             self.redeploy_button.clicked.connect(self._on_redeploy)
@@ -2739,7 +3292,32 @@ if _HAS_QT:
             )
             row.addWidget(open_data)
             self.open_data_button = open_data
+            open_appconfig = QPushButton("打开应用配置目录")
+            open_appconfig.setToolTip("打开本应用自己的配置目录（config.json 所在处）。")
+            open_appconfig.clicked.connect(self._open_appconfig_dir)
+            row.addWidget(open_appconfig)
+            self.open_appconfig_button = open_appconfig
             action_card.body.addLayout(row)
+
+            reset_row = QHBoxLayout()
+            reset_row.setSpacing(8)
+            restore_button = QPushButton("恢复默认设置")
+            restore_button.setToolTip(
+                "还原本应用写入的全部配置（方案重置补丁、用户词典学习覆盖、"
+                "外观覆盖、简洁译注影子副本、已保存的开关选项）。"
+                "不会删除已安装的模型。"
+            )
+            restore_button.clicked.connect(self._on_restore)
+            reset_row.addWidget(restore_button)
+            self.restore_button = restore_button
+            clear_cache = QPushButton("清除 AI 缓存")
+            clear_cache.setToolTip("删除输入法服务的译注缓存文件，下次输入时重建。")
+            clear_cache.clicked.connect(self._on_clear_cache)
+            reset_row.addWidget(clear_cache)
+            self.clear_cache_button = clear_cache
+            reset_row.addStretch(1)
+            action_card.body.addLayout(reset_row)
+
             self.detail_label = QLabel("")
             self.detail_label.setObjectName("DetailValue")
             self.detail_label.setWordWrap(True)
@@ -2757,7 +3335,13 @@ if _HAS_QT:
         # -- off-thread transaction support --
 
         def _interactive_controls(self):
-            return [self.redeploy_button, self.open_data_button]
+            return [
+                self.redeploy_button,
+                self.open_data_button,
+                self.open_appconfig_button,
+                self.restore_button,
+                self.clear_cache_button,
+            ]
 
         def transaction_active(self) -> bool:
             return self._tx.active
@@ -2771,10 +3355,25 @@ if _HAS_QT:
             except Exception as exc:  # pragma: no cover - defensive
                 _update_strip(self.strip, "error", f"无法打开：{exc}")
 
+        def _open_appconfig_dir(self) -> None:
+            self._open_path(appconfig.config_dir())
+
         def _on_redeploy(self) -> None:
             from . import deploy
 
             deployer = paths.weasel_deployer_exe(paths.weasel_root())
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认重新部署",
+                    "重新部署会重建 Rime / Weasel 配置，期间可能短暂无法打字。"
+                    "是否继续？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
             self._tx.run(
                 "正在重新部署…",
                 deploy.run_deploy,
@@ -2810,6 +3409,156 @@ if _HAS_QT:
 
         def _on_redeploy_error(self, message: str) -> None:
             _update_strip(self.strip, "error", f"部署失败：{message}")
+
+        # -- restore defaults (恢复默认) --
+
+        _RESTORE_ITEM_NAMES = {
+            "learning_override": "用户词典学习覆盖",
+            "weasel_style": "候选窗外观覆盖",
+            "plain_gloss": "简洁译注影子副本",
+            "user_yaml_options": "已保存的开关选项",
+        }
+
+        def _restore_item_text(self, item: dict) -> str:
+            key = str(item.get("key") or "")
+            if key == "schema_resets":
+                schema_id = str(item.get("schema_id") or "")
+                name = SCHEMA_LABELS.get(schema_id, "方案重置补丁")
+            else:
+                name = self._RESTORE_ITEM_NAMES.get(key, key or "未知项")
+
+            if not item.get("ok"):
+                status = "无法还原"
+            elif item.get("changed"):
+                status = "已还原"
+            else:
+                status = "无需更改"
+
+            note = item.get("note")
+            if key == "user_yaml_options":
+                # Humanise the option names; never surface raw identifiers.
+                removed = item.get("removed") or []
+                unsafe = item.get("unsafe") or []
+                parts: list[str] = []
+                if removed:
+                    parts.append(
+                        "已移除：" + "、".join(switch_label(n) for n in removed)
+                    )
+                if unsafe:
+                    parts.append(
+                        "以下为流式映射，无法安全还原："
+                        + "、".join(switch_label(n) for n in unsafe)
+                    )
+                note = "；".join(parts) or None
+
+            text = f"{name}：{status}"
+            if note:
+                text += f"（{note}）"
+            return text
+
+        def _on_restore(self) -> None:
+            from . import restore_defaults
+
+            summary = (
+                "将还原本应用写入的全部配置：\n\n"
+                "· 各方案的重置补丁（恢复方案自带 reset 行为）\n"
+                "· 用户词典学习覆盖（恢复默认开启）\n"
+                "· 候选窗外观覆盖（恢复安装时默认外观）\n"
+                "· 简洁译注影子副本（恢复内置语言标签）\n"
+                "· 已保存的开关选项\n\n"
+                "不会删除已安装的模型。完成后会重新部署一次。\n\n"
+                f"{_RESTART_WARNING}"
+            )
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认恢复默认",
+                    summary,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
+            self._tx.run(
+                "正在恢复默认设置并重新部署…",
+                restore_defaults.restore_defaults,
+                on_success=self._on_restore_done,
+                on_error=self._on_restore_error,
+            )
+
+        def _on_restore_done(self, result: dict) -> None:
+            lines = [self._restore_item_text(item) for item in result.get("items") or []]
+            deploy = result.get("deploy") or {}
+            if deploy:
+                lines.append(
+                    "部署："
+                    + ("完成（stderr 为空）" if result.get("deploy_clean")
+                       else f"退出码 {deploy.get('exit_code')}，"
+                            f"stderr：{deploy.get('stderr') or '（空）'}")
+                )
+            self.detail_label.setText("\n".join(lines) or "（无更改）")
+
+            if result.get("ok"):
+                state = "success" if result.get("changed_any") else "neutral"
+                text = (
+                    "已恢复默认设置。"
+                    if result.get("changed_any")
+                    else "一切均已是默认状态，无需更改。"
+                )
+                _update_strip(self.strip, state, text)
+                QMessageBox.information(self, "恢复默认", text + "\n明细见下方。")
+            else:
+                _update_strip(
+                    self.strip,
+                    "error",
+                    "恢复默认未完全完成，无法安全还原的部分已在明细中说明。",
+                )
+                QMessageBox.warning(
+                    self,
+                    "恢复默认",
+                    "部分项目未能还原，明细见下方。",
+                )
+
+        def _on_restore_error(self, message: str) -> None:
+            _update_strip(self.strip, "error", f"恢复默认失败：{message}")
+            QMessageBox.critical(self, "恢复默认失败", message)
+
+        # -- clear AI cache --
+
+        def _on_clear_cache(self) -> None:
+            from . import server
+
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认清除 AI 缓存",
+                    "删除输入法服务的译注缓存？删除后下次输入会自动重建"
+                    "（首次译注会略慢）。",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
+            self._tx.run(
+                "正在清除 AI 缓存…",
+                server.clear_ai_cache,
+                on_success=self._on_clear_cache_done,
+                on_error=self._on_clear_cache_error,
+            )
+
+        def _on_clear_cache_done(self, result: dict) -> None:
+            if result.get("removed"):
+                _update_strip(self.strip, "success", "AI 缓存已清除。")
+            elif result.get("existed"):
+                _update_strip(self.strip, "error", "缓存文件存在但删除失败。")
+            else:
+                _update_strip(self.strip, "neutral", "没有需要清除的 AI 缓存。")
+            self.detail_label.setText(f"缓存文件：{result.get('target') or '（未知）'}")
+
+        def _on_clear_cache_error(self, message: str) -> None:
+            _update_strip(self.strip, "error", f"清除 AI 缓存失败：{message}")
 
     class MainWindow(QMainWindow):
         """Settings window: left nav + stacked pages + status bar."""

@@ -46,6 +46,7 @@ __all__ = [
     "read_yaml_text",
     "read_user_yaml_options",
     "set_user_yaml_option",
+    "remove_user_yaml_option",
 ]
 
 # --- Basic text I/O ---------------------------------------------------------
@@ -315,6 +316,148 @@ def set_user_yaml_option(
     backup_file(target)
     atomic_write_text(target, updated)
     return True
+
+
+def _remove_var_option(text: str, name: str) -> "str | None":
+    """Return ``text`` with ``var/option/<name>`` removed.
+
+    Returns ``None`` when the option is spelled as an inline flow mapping
+    (``option: {a: 1, b: 2}``): removing one entry from that shape without a
+    real YAML round-trip is not safe, so callers must report it rather than
+    silently skip it.  An unchanged string is returned when nothing matched.
+    """
+    lines = text.split("\n")
+    trailing = None
+    if lines and lines[-1] == "":
+        trailing = lines.pop()
+
+    var_index = None
+    for index, line in enumerate(lines):
+        if _RE_VAR.match(line):
+            var_index = index
+            break
+    if var_index is None:
+        return text
+
+    var_indent = _indent_of(lines[var_index])
+    option_index = None
+    scan = var_index + 1
+    while scan < len(lines):
+        line = lines[scan]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            scan += 1
+            continue
+        if _indent_of(line) <= var_indent:
+            break
+        if _RE_OPTION.match(line) or _RE_OPTION_INLINE.match(line):
+            option_index = scan
+            break
+        scan += 1
+    if option_index is None:
+        return text
+    if _RE_OPTION_INLINE.match(lines[option_index]):
+        return None
+
+    option_indent = _indent_of(lines[option_index])
+    key_index = None
+    scan = option_index + 1
+    while scan < len(lines):
+        line = lines[scan]
+        stripped = line.strip()
+        if not stripped:
+            scan += 1
+            continue
+        if _indent_of(line) <= option_indent:
+            break
+        if stripped.startswith("#"):
+            scan += 1
+            continue
+        match = _RE_KEY.match(line)
+        if match and match.group(2).strip() == name:
+            key_index = scan
+            break
+        scan += 1
+    if key_index is None:
+        return text
+
+    del lines[key_index]
+
+    # Drop an ``option:`` block that no longer has any entries.
+    remaining = False
+    scan = option_index + 1
+    while scan < len(lines):
+        line = lines[scan]
+        stripped = line.strip()
+        if not stripped:
+            scan += 1
+            continue
+        if _indent_of(line) <= option_indent:
+            break
+        if stripped.startswith("#"):
+            scan += 1
+            continue
+        remaining = True
+        break
+    if not remaining:
+        del lines[option_index]
+        # ... and a ``var:`` block that becomes empty in turn.
+        var_remaining = False
+        scan = var_index + 1
+        while scan < len(lines):
+            line = lines[scan]
+            stripped = line.strip()
+            if not stripped:
+                scan += 1
+                continue
+            if _indent_of(line) <= var_indent:
+                break
+            if stripped.startswith("#"):
+                scan += 1
+                continue
+            var_remaining = True
+            break
+        if not var_remaining:
+            del lines[var_index]
+
+    result = "\n".join(lines)
+    if trailing is not None:
+        result += "\n"
+    return result
+
+
+def remove_user_yaml_option(
+    path: str | os.PathLike[str], name: str
+) -> dict[str, Any]:
+    """Surgically remove ``var/option/<name>`` from ``user.yaml``.
+
+    Pure-text, byte-preserving edit of only the affected lines (the same
+    discipline as :func:`set_user_yaml_option`).  Backs the file up and writes
+    atomically when something changes.  Returns
+    ``{"path", "name", "removed", "unsafe"}`` where ``unsafe`` is True for an
+    inline flow ``option:`` mapping that cannot be edited safely.
+    """
+    target = Path(path)
+    result: dict[str, Any] = {
+        "path": str(target),
+        "name": name,
+        "removed": False,
+        "unsafe": False,
+    }
+    try:
+        original = read_yaml_text(target)
+    except OSError:
+        return result
+    updated = _remove_var_option(original, name)
+    if updated is None:
+        result["unsafe"] = True
+        return result
+    if updated == original:
+        return result
+    backup_file(target)
+    atomic_write_text(target, updated)
+    result["removed"] = True
+    return result
 
 
 def read_user_yaml_options(path: str | os.PathLike[str]) -> dict[str, bool]:

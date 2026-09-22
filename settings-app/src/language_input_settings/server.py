@@ -36,6 +36,7 @@ __all__ = [
     "server_stopped",
     "read_process_env",
     "read_server_env",
+    "clear_ai_cache",
     "apply_backend",
 ]
 
@@ -455,6 +456,24 @@ def _clear_ai_cache(user_dir: Path | None) -> tuple[bool, str | None]:
     except OSError:
         return False, str(target)
     return False, str(target)
+
+
+def clear_ai_cache(user_dir: Path | None = None) -> dict:
+    """Delete ``<userdir>\\language_input\\ai_cache_v3.json`` (public wrapper).
+
+    Exposes the cache-clearing step of :func:`apply_backend` so the GUI can
+    offer an explicit "清除 AI 缓存" action without re-applying a backend.  The
+    server tolerates a missing cache; deleting a non-existent file is a no-op.
+    Returns ``{"target", "existed", "removed"}``.
+    """
+    target = paths.ai_cache_path(user_dir or paths.rime_user_dir())
+    existed = bool(target is not None and target.is_file())
+    removed, _path = _clear_ai_cache(user_dir)
+    return {
+        "target": str(target) if target is not None else None,
+        "existed": existed,
+        "removed": bool(removed),
+    }
 
 
 def _remote_snapshot(env: dict[str, str]) -> dict[str, str | bool | None]:
