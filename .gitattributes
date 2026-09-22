@@ -1,0 +1,25 @@
+# ---- Line endings ----------------------------------------------------------
+# This project's own artifacts must be UTF-8 (no BOM) + LF: a stray BOM/CRLF has
+# already caused a silent host failure once, and a CRLF host source changes the
+# built exe's hash. Engine files from upstream keep their own history; we do not
+# rewrite them here.
+/settings-app/**    text eol=lf
+/scripts/**         text eol=lf
+/language-input/**  text eol=lf
+/patches/**         text eol=lf
+/REPO-STRUCTURE.md  text eol=lf
+/tools/**/*.py      text eol=lf
+/tools/**/*.md      text eol=lf
+/tools/**/*.json    text eol=lf
+/tools/**/*.ps1     text eol=crlf
+*.ps1               text eol=crlf
+*.bat               text eol=crlf
+
+# ---- Binary ---------------------------------------------------------------
+*.ico binary
+*.png binary
+*.dll binary
+*.exe binary
+*.pdb binary
+*.lib binary
+*.bin binary

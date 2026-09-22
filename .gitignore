@@ -75,10 +75,10 @@ settings-app/dist/
 settings-app/.shots/
 settings-app/.m0/
 settings-app/.work/
-patches/model-host/.venv/
-patches/model-host/build/
-patches/model-host/dist/
-patches/model-host/backup/
-patches/model-host/harness/results/
+tools/model-host/.venv/
+tools/model-host/build/
+tools/model-host/dist/
+tools/model-host/backup/
+tools/model-host/harness/results/
 *.bak-*
 *.part

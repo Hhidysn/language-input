@@ -10,7 +10,7 @@
 | `WeaselTSF/` `WeaselServer/` `WeaselUI/` `WeaselIPC/` `WeaselDeployer/` `WeaselIME/` `WeaselSetup/` `RimeWithWeasel/` `include/` | 引擎（上游 weasel + 本 fork 改动） | TSF 输入法、常驻服务、候选窗、部署器、librime 桥接 |
 | `language-input/` | 本 fork 自有功能 | Rime schema、Lua 译注过滤器、GlossPack、模型目录清单、设计与验证文档 |
 | `scripts/` | 本 fork 自有 | 模型宿主 Python 源码（`language_input_model_host.py` 由我们在树内直接修改）+ 打包/评测脚本 |
-| `patches/` | 本 fork 自有 | 仅 `librime` 敏感域补丁 `librime/librime-sensitive-mode.patch`；模型宿主性能修复已改为源码内直接修改，不再是补丁 |
+| `patches/` | 本 fork 自有 | 上游构建补丁：`librime-sensitive-mode.patch`（librime 敏感域门控）、`boost-1.84-msvc-14.4.patch`；**模型宿主性能修复已改为源码内直接修改**（`scripts/language_input_model_host.py`），不再是补丁 |
 | `librime/` `plum/` | 子模块（上游） | `rime/librime`、`rime/plum`；克隆需 `--recursive` |
 | `settings-app/` | **本项目自研** | PySide6 托盘设置应用（与引擎仅通过注册表/可执行文件对接） |
 | `tools/` | 本项目自研 | 构建编排脚本 + 模型宿主构建/应用/回滚与验证工具（`tools/model-host/`） |
