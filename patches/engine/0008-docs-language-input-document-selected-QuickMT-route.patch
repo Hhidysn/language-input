@@ -1,0 +1,165 @@
+From c165a1aada1836cffa0c79b7b27da76820c88f48 Mon Sep 17 00:00:00 2001
+From: Hhidysn <2244320356@qq.com>
+Date: Sun, 30 Aug 2026 09:58:58 +0800
+Subject: [PATCH 08/10] docs(language-input): document selected QuickMT route
+
+---
+ language-input/MODEL.zh-CN.md               | 69 +++++++++++++++++++++
+ language-input/README.zh-CN.md              |  4 +-
+ language-input/VERIFICATION.md              |  6 ++
+ language-input/model-research/CANDIDATES.md | 20 ++++--
+ 4 files changed, 91 insertions(+), 8 deletions(-)
+ create mode 100644 language-input/MODEL.zh-CN.md
+
+diff --git a/language-input/MODEL.zh-CN.md b/language-input/MODEL.zh-CN.md
+new file mode 100644
+index 0000000..a731644
+--- /dev/null
++++ b/language-input/MODEL.zh-CN.md
+@@ -0,0 +1,69 @@
++# 当前使用的翻译模型
++
++## 一句话结论
++
++当前 `0.17.4.3` 版本的 AI 翻译采用 **QuickMT 三组件翻译路线**
++`quickmt-gloss-route-v2`，不是腾讯混元 `Hy-MT2-1.8B`。核心安装包不携带权重；导入相应的 `.limodel` 包后才会在本机运行。
++
++它的定位是输入法候选栏的**短释义和词汇提示**，不是语言考试、长文翻译或权威词典。AI 输出会保留 `〔语言·AI〕` 来源标记，且 AI 模式不会回退到固定词典。
++
++## 实际组件和语言路线
++
++这不是一个包覆盖所有语言，而是按需导入的三个 QuickMT 组件。每个 `.limodel` 包都小于 1–2 GB。
++
++| 目标语言 | 实际路线 | 需要导入的包 | `.limodel` 大小 |
++| --- | --- | --- | ---: |
++| 英语 | 中文 → 英语 | `quickmt-zh-en` | 409,710,191 B |
++| 日语 | 中文 → 英语 → 日语 | `quickmt-zh-en` + `quickmt-en-ja` | 403,642,726 B（增量包） |
++| 西班牙语 | 中文 → 英语 → 西班牙语 | `quickmt-zh-en` + `quickmt-en-es` | 403,609,399 B（增量包） |
++
++日语和西班牙语包依赖英语基础包，因此必须先导入 `quickmt-zh-en`。包名、版本、SHA256 和依赖关系以 [`models/packs-v2.json`](models/packs-v2.json) 为准。
++
++### 固定版本
++
++| 组件 | 上游仓库 | 固定 revision |
++| --- | --- | --- |
++| 中文→英语 | [`quickmt/quickmt-zh-en`](https://huggingface.co/quickmt/quickmt-zh-en) | `c27cc8024e01a047733a1e34796e2ab19d74b237` |
++| 英语→日语 | [`quickmt/quickmt-en-ja`](https://huggingface.co/quickmt/quickmt-en-ja) | `c09e98b8438a239a8210060114cea19c426c0559` |
++| 英语→西班牙语 | [`quickmt/quickmt-en-es`](https://huggingface.co/quickmt/quickmt-en-es) | `430b78899a30bf5a867dffd407c64b028bbaebf4` |
++
++三个组件均按 CC BY 4.0 分发，归属说明见 [`licenses/QUICKMT-CC-BY-4.0-NOTICE.txt`](licenses/QUICKMT-CC-BY-4.0-NOTICE.txt)。
++
++## 本地运行方式
++
++- 推理运行时：CTranslate2 `4.8.1`，INT8；分词器为 SentencePiece `0.2.1`。
++- 解码参数：beam size `4`，最多生成 `4` 个候选释义，候选栏最多显示 `2` 个不同释义。
++- 进程：安装目录中的 `LanguageInputModelHost.exe`（x64），仅通过随机端口的 `127.0.0.1` 回环地址与输入法通信。
++- 默认 AI 模式不访问互联网，也不需要 API key；模型包由用户显式导入，不随核心安装包捆绑。
++
++## 为什么选它
++
++在面向输入法的实用测试中，QuickMT 路线满足了当前的结构、安全、覆盖率、内存和延迟要求：
++
++| 目标语言 | 普通词覆盖率 | 热启动 9 候选 p95 | 峰值工作集 |
++| --- | ---: | ---: | ---: |
++| 英语 | 100% | 39 ms | 0.70 GiB |
++| 日语 | 98.96% | 207 ms | 0.89 GiB |
++| 西班牙语 | 100% | 121 ms | 0.89 GiB |
++
++这些数据来自新的实用盲测集；这里的“覆盖率”表示能生成合法短释义，不代表每个词义都完美。完整记录见 [`model-research/quickmt-practical-v2.json`](model-research/quickmt-practical-v2.json)。
++
++## 与输入法开关的关系
++
++- `翻译来源：AI`：使用上面的 QuickMT 路线。
++- `翻译来源：词典`：使用内置 CC-CEDICT 英语 GlossPack，不调用模型。
++- `译注显示：关`：不查询词典、不请求模型、不读写 AI 缓存，也不显示或朗读译注。
++- 日语和西班牙语使用英语中间结果，所以英语词义判断错误可能传递到第二段翻译。
++
++## 已知限制
++
++- 孤立短词、多义词、地域词和专业词可能得到不合适的释义。
++- AI 结果是辅助记忆的词汇提示，不应当当作权威定义、法律/医学翻译或考试评分依据。
++- 没有匹配结果时可以不显示译注，这是覆盖率限制，不是输入法崩溃。
++- 密码、PIN 等敏感控件不会请求模型、读写缓存、显示译注或朗读。
++
++## 没有集成的模型
++
++腾讯混元 `Hy-MT2-1.8B`、Qwen、M2M100 等名称出现在候选评估或讨论资料中，但**不是当前安装包使用的模型**。它们没有被偷偷替换到正式路径；历史筛选证据保留在 [`model-research/CANDIDATES.md`](model-research/CANDIDATES.md) 和 [`models/catalog-v1.json`](models/catalog-v1.json) 中。
++
++用户操作和导入步骤见 [`README.zh-CN.md`](README.zh-CN.md)。
+diff --git a/language-input/README.zh-CN.md b/language-input/README.zh-CN.md
+index 2431b3f..9a945d0 100644
+--- a/language-input/README.zh-CN.md
++++ b/language-input/README.zh-CN.md
+@@ -7,7 +7,7 @@ Language Input 是一个基于小狼毫 Weasel 0.17.4 和 librime 1.13.1 源码
+ - 默认方案为 `译注小鹤双拼`，同时保留 `译注全拼`。
+ - 每页 9 个候选；候选译注显示、翻译来源、目标语言和朗读分别控制。
+ - 词典模式使用内置 CC-CEDICT 英文 GlossPack，完全离线。
+-- AI 模式使用本机 QuickMT 小模型，支持英语、日语和西班牙语；不会回退到固定词典。
++- AI 模式使用本机 QuickMT 三组件路线，支持英语、日语和西班牙语；不会回退到固定词典。当前实际模型与版本见 [`MODEL.zh-CN.md`](MODEL.zh-CN.md)。
+ - 三个模型组件都是约 404–410 MB 的按需 `.limodel` 包，不随核心安装包捆绑。
+ - AI Host 只监听随机的 `127.0.0.1` 端口，使用每次启动随机生成的 Bearer 令牌，并在 10 分钟没有合格请求后退出。
+ - 密码、PIN 和尚未识别输入范围的控件中，禁止译注、模型请求、缓存读写、朗读和用户词典学习。
+@@ -35,7 +35,7 @@ AI 译注带有明确来源标记，例如 `〔en·AI〕 hello; hi`、`〔ja·AI
+ 
+ ## 导入本地 AI 语言包
+ 
+-安装程序只包含约 118 MB 的本地推理 Host，不包含模型。安装后从开始菜单打开 `Language Input AI 语言包管理`，逐个选择 `.limodel` 文件导入。导入时会校验整包和包内每个文件的 SHA256；不匹配或依赖缺失的包会被拒绝。
++安装程序只包含约 118 MB 的本地推理 Host，不包含模型。安装后从开始菜单打开 `Language Input AI 语言包管理`，逐个选择 `.limodel` 文件导入。导入时会校验整包和包内每个文件的 SHA256；不匹配或依赖缺失的包会被拒绝。包清单和当前 QuickMT 路线见 [`MODEL.zh-CN.md`](MODEL.zh-CN.md)。
+ 
+ | 用途 | 文件 | 大小 | SHA256 |
+ | --- | --- | ---: | --- |
+diff --git a/language-input/VERIFICATION.md b/language-input/VERIFICATION.md
+index e577838..2264222 100644
+--- a/language-input/VERIFICATION.md
++++ b/language-input/VERIFICATION.md
+@@ -23,6 +23,12 @@ Do not change a `Pending` row to `Passed` without recording fresh evidence from
+ 
+ ## v0.2 local-AI release matrix (2026-08-29)
+ 
++The authoritative description of the model actually used by the installer is
++[`MODEL.zh-CN.md`](MODEL.zh-CN.md). The selected route is QuickMT
++`quickmt-gloss-route-v2` running through CTranslate2; the other model names in
++the research archive are candidates or rejected baselines, not hidden runtime
++dependencies.
++
+ | Requirement | Automated evidence | Runtime evidence | Status |
+ | --- | --- | --- | --- |
+ | English, Japanese and Spanish `.limodel` packs | Whole-pack and per-file SHA256 audit; dependency and atomic-replace tests | Three real packs imported and all three routes produced glosses | Passed |
+diff --git a/language-input/model-research/CANDIDATES.md b/language-input/model-research/CANDIDATES.md
+index e6dd6dd..0638964 100644
+--- a/language-input/model-research/CANDIDATES.md
++++ b/language-input/model-research/CANDIDATES.md
+@@ -38,8 +38,15 @@ occupancy caps remain unexceeded.
+ Status: **CTranslate2 4.8.1 QuickMT route selected for practical preview
+ integration under the revised 2026-08-29 acceptance contract**.
+ 
+-The pinned runtime candidate is official `ggml-org/llama.cpp` release
+-`v0.3.0`, annotated tag target commit
++The product runtime is the CTranslate2-based `LanguageInputModelHost.exe`
++described in [`../MODEL.zh-CN.md`](../MODEL.zh-CN.md). It loads the three
++QuickMT `.limodel` components listed in `models/packs-v2.json`; this is the
++route used by the current installer.
++
++The pinned `ggml-org/llama.cpp` release below belongs to the earlier screening
++of general-purpose LLM candidates. It is retained as research evidence only;
++it is not shipped and is not used for the current QuickMT translation route.
++The research build was release `v0.3.0`, annotated tag target commit
+ `c1d0e7a004015f23bc0233470b747b596f29b264`, published 2026-08-25.
+ 
+ Authoritative evidence:
+@@ -57,10 +64,11 @@ Authoritative evidence:
+   It is MIT; the retrieved UTF-8 text has SHA256
+   `94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d`.
+ 
+-The pinned source was built successfully with Visual Studio 2022 for portable
+-x64 CPU use (`GGML_NATIVE=OFF`, dynamic CPU backends enabled, CUDA/Vulkan/
+-OpenCL/BLAS disabled). The resulting launcher reports build 300 at the pinned
+-commit; `llama-server.exe` is 10,752 bytes with SHA256
++For that rejected general-LLM screening, the pinned source was built
++successfully with Visual Studio 2022 for portable x64 CPU use
++(`GGML_NATIVE=OFF`, dynamic CPU backends enabled, CUDA/Vulkan/OpenCL/BLAS
++disabled). The resulting launcher reports build 300 at the pinned commit;
++`llama-server.exe` is 10,752 bytes with SHA256
+ `9beafb4c8dc176199865e61b168bcda3cbddf0349b696efb90ab1fa19eba7c6e`.
+ Static and real-process checks confirmed Qwen3.5 loading, loopback port-zero
+ binding, bearer authentication and schema-constrained chat completions. This

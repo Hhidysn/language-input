@@ -1,0 +1,4002 @@
+From a57d7f06ce72be9db4bd7b774fb1c6353847ea3a Mon Sep 17 00:00:00 2001
+From: Hhidysn <2244320356@qq.com>
+Date: Mon, 31 Aug 2026 02:54:00 +0800
+Subject: [PATCH 10/10] feat(language-input): add optional M2M100 backend
+
+---
+ RimeWithWeasel/LanguageInputRemote.cpp        | 313 ++++++--
+ RimeWithWeasel/LanguageInputRemote.h          |  29 +-
+ RimeWithWeasel/RimeWithWeasel.cpp             |  54 +-
+ language-input/MODEL.zh-CN.md                 |  63 +-
+ language-input/PRIVACY.zh-CN.md               |   7 +-
+ language-input/README.zh-CN.md                |  22 +-
+ language-input/VERIFICATION.md                | 137 +++-
+ .../licenses/M2M100-MIT-LICENSE.txt           |  21 +
+ language-input/licenses/M2M100-NOTICE.txt     |  10 +
+ language-input/model-research/CANDIDATES.md   |  81 +-
+ .../model-research/m2m100-pack-input-v1.json  |  15 +
+ language-input/models/m2m100-packs-v1.json    |  65 ++
+ .../rime/language_input_flypy.schema.yaml     |   3 +
+ .../rime/language_input_pinyin.schema.yaml    |   3 +
+ scripts/benchmark_m2m100_host.py              | 594 +++++++++++++++
+ scripts/build_m2m100_model_pack.py            | 226 ++++++
+ scripts/build_model_host.ps1                  |  18 +-
+ scripts/language_input_model_host.py          | 720 +++++++++++++++++-
+ scripts/stage_language_input.ps1              |  29 +-
+ scripts/stage_model_host.ps1                  |  19 +-
+ tests/native/LanguageInputRemoteTests.cpp     | 173 ++++-
+ tests/test_language_input_model_host.py       | 180 +++++
+ tests/test_rime_gloss.ps1                     | 122 +--
+ 23 files changed, 2686 insertions(+), 218 deletions(-)
+ create mode 100644 language-input/licenses/M2M100-MIT-LICENSE.txt
+ create mode 100644 language-input/licenses/M2M100-NOTICE.txt
+ create mode 100644 language-input/model-research/m2m100-pack-input-v1.json
+ create mode 100644 language-input/models/m2m100-packs-v1.json
+ create mode 100644 scripts/benchmark_m2m100_host.py
+ create mode 100644 scripts/build_m2m100_model_pack.py
+
+diff --git a/RimeWithWeasel/LanguageInputRemote.cpp b/RimeWithWeasel/LanguageInputRemote.cpp
+index 969323c..1348df1 100644
+--- a/RimeWithWeasel/LanguageInputRemote.cpp
++++ b/RimeWithWeasel/LanguageInputRemote.cpp
+@@ -183,6 +183,11 @@ std::optional<ParsedEndpoint> ParseEndpoint(const RemoteGlossConfig& config) {
+   bool secure = parts.nScheme == INTERNET_SCHEME_HTTPS;
+   if (!secure && (parts.nScheme != INTERNET_SCHEME_HTTP || !config.allow_http))
+     return std::nullopt;
++  if (config.use_local_host &&
++      (parts.lpszHostName == nullptr ||
++       std::wstring_view(parts.lpszHostName, parts.dwHostNameLength) !=
++           L"127.0.0.1"))
++    return std::nullopt;
+ 
+   ParsedEndpoint result;
+   result.host.assign(parts.lpszHostName, parts.dwHostNameLength);
+@@ -199,21 +204,29 @@ std::optional<ParsedEndpoint> ParseEndpoint(const RemoteGlossConfig& config) {
+   return result;
+ }
+ 
+-std::optional<std::string> PostJson(const RemoteGlossConfig& config,
+-                                    std::string_view body) {
++struct PostJsonResult {
++  std::optional<std::string> body;
++  RemoteGlossError error = RemoteGlossError::kTransport;
++};
++
++PostJsonResult PostJson(const RemoteGlossConfig& config,
++                        std::string_view body) {
+   auto endpoint = ParseEndpoint(config);
+   if (!endpoint || body.empty() ||
+       body.size() > static_cast<size_t>((std::numeric_limits<DWORD>::max)()))
+-    return std::nullopt;
++    return {};
+ 
+   WinHttpHandle session(
+-      WinHttpOpen(L"Language Input/0.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
++      WinHttpOpen(L"Language Input/0.1",
++                  config.use_local_host ? WINHTTP_ACCESS_TYPE_NO_PROXY
++                                        : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+   if (!session)
+-    return std::nullopt;
++    return {};
++  const int request_timeout_ms = config.request_timeout_ms;
+   WinHttpSetTimeouts(session.get(), config.connect_timeout_ms,
+-                     config.connect_timeout_ms, config.request_timeout_ms,
+-                     config.request_timeout_ms);
++                     config.connect_timeout_ms, request_timeout_ms,
++                     request_timeout_ms);
+   DWORD secure_protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+   WinHttpSetOption(session.get(), WINHTTP_OPTION_SECURE_PROTOCOLS,
+                    &secure_protocols, sizeof(secure_protocols));
+@@ -221,14 +234,14 @@ std::optional<std::string> PostJson(const RemoteGlossConfig& config,
+   WinHttpHandle connection(
+       WinHttpConnect(session.get(), endpoint->host.c_str(), endpoint->port, 0));
+   if (!connection)
+-    return std::nullopt;
++    return {};
+   const wchar_t* accept_types[] = {L"application/json", nullptr};
+   WinHttpHandle request(
+       WinHttpOpenRequest(connection.get(), L"POST", endpoint->path.c_str(),
+                          nullptr, WINHTTP_NO_REFERER, accept_types,
+                          endpoint->secure ? WINHTTP_FLAG_SECURE : 0));
+   if (!request)
+-    return std::nullopt;
++    return {};
+ 
+   DWORD redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+   WinHttpSetOption(request.get(), WINHTTP_OPTION_REDIRECT_POLICY,
+@@ -236,7 +249,7 @@ std::optional<std::string> PostJson(const RemoteGlossConfig& config,
+ 
+   auto key = Utf8ToWide(config.api_key);
+   if (!key || key->find_first_of(L"\r\n") != std::wstring::npos)
+-    return std::nullopt;
++    return {};
+   std::wstring headers =
+       L"Content-Type: application/json\r\nAccept: application/json\r\n"
+       L"Authorization: Bearer ";
+@@ -248,45 +261,55 @@ std::optional<std::string> PostJson(const RemoteGlossConfig& config,
+   SecureZeroMemory(headers.data(), headers.size() * sizeof(wchar_t));
+   SecureZeroMemory(key->data(), key->size() * sizeof(wchar_t));
+   if (!sent || !WinHttpReceiveResponse(request.get(), nullptr))
+-    return std::nullopt;
++    return {};
+ 
+   DWORD status = 0;
+   DWORD status_size = sizeof(status);
+   if (!WinHttpQueryHeaders(
+           request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+           WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+-          WINHTTP_NO_HEADER_INDEX) ||
+-      status < 200 || status >= 300)
+-    return std::nullopt;
++          WINHTTP_NO_HEADER_INDEX))
++    return {};
+ 
+   std::string response;
+   for (;;) {
+     DWORD available = 0;
+     if (!WinHttpQueryDataAvailable(request.get(), &available))
+-      return std::nullopt;
++      return {};
+     if (available == 0)
+       break;
+     if (available > kMaxResponseBytes - response.size())
+-      return std::nullopt;
++      return {};
+     size_t offset = response.size();
+     response.resize(offset + available);
+     DWORD read = 0;
+     if (!WinHttpReadData(request.get(), response.data() + offset, available,
+                          &read))
+-      return std::nullopt;
++      return {};
+     response.resize(offset + read);
+   }
+-  return response;
++  if (status == 409) {
++    if (response.find("missing-model-component") != std::string::npos)
++      return {std::nullopt, RemoteGlossError::kMissingModel};
++    if (response.find("missing-model-runtime") != std::string::npos)
++      return {std::nullopt, RemoteGlossError::kMissingRuntime};
++  }
++  if (status < 200 || status >= 300)
++    return {std::nullopt, RemoteGlossError::kTransport};
++  return {std::move(response), RemoteGlossError::kNone};
+ }
+ 
+-std::optional<RemoteGlossMap> DefaultTransport(
++RemoteGlossTransportResult DefaultTransport(
+     const RemoteGlossConfig& config,
+     const std::vector<std::string>& words) {
+   std::string request = BuildRemoteGlossRequest(config, words);
+   auto response = PostJson(config, request);
+-  if (!response)
+-    return std::nullopt;
+-  return ParseRemoteGlossResponse(*response, words);
++  if (!response.body)
++    return {std::nullopt, response.error};
++  auto parsed = ParseRemoteGlossResponse(*response.body, words);
++  if (!parsed)
++    return {std::nullopt, RemoteGlossError::kInvalidResponse};
++  return {std::move(*parsed), RemoteGlossError::kNone};
+ }
+ 
+ std::wstring QuoteCommandArgument(const std::filesystem::path& path) {
+@@ -347,15 +370,22 @@ class LocalHostProcess {
+     const unsigned port = 49152 + (port_value % 15000);
+     auto executable = QuoteCommandArgument(config.local_host_executable);
+     auto catalog = QuoteCommandArgument(config.local_host_catalog);
++    auto m2m100_catalog = config.local_host_m2m100_catalog.empty()
++                              ? std::wstring()
++                              : QuoteCommandArgument(config.local_host_m2m100_catalog);
+     auto models = QuoteCommandArgument(config.local_host_models);
+     auto wide_token = Utf8ToWide(*token);
+-    if (executable.empty() || catalog.empty() || models.empty() || !wide_token)
++    if (executable.empty() || catalog.empty() || models.empty() ||
++        (!config.local_host_m2m100_catalog.empty() && m2m100_catalog.empty()) ||
++        !wide_token)
+       return false;
+ 
+     std::wstring command = executable + L" --serve --catalog " + catalog +
+                            L" --models " + models + L" --port " +
+                            std::to_wstring(port) + L" --token " + *wide_token +
+                            L" --idle-seconds 600";
++    if (!m2m100_catalog.empty())
++      command += L" --m2m100-catalog " + m2m100_catalog;
+     STARTUPINFOW startup = {};
+     startup.cb = sizeof(startup);
+     PROCESS_INFORMATION process = {};
+@@ -496,6 +526,9 @@ RemoteGlossConfig LoadRemoteGlossConfig(
+   config.local_host_catalog =
+       install_dir / L"data" / L"language_input" / L"models" /
+       L"packs-v2.json";
++  config.local_host_m2m100_catalog =
++      install_dir / L"data" / L"language_input" / L"models" /
++      L"m2m100-packs-v1.json";
+   config.local_host_models = cache_path.parent_path() / L"models";
+   config.model = "quickmt-gloss-route-v2";
+ 
+@@ -544,6 +577,8 @@ std::string BuildRemoteGlossRequest(const RemoteGlossConfig& config,
+   boost::json::object data;
+   data["target_language"] = config.language;
+   data["words"] = std::move(word_values);
++  if (config.use_local_host)
++    data["model"] = config.model;
+ 
+   boost::json::array messages;
+   messages.emplace_back(boost::json::object{
+@@ -613,8 +648,10 @@ class RemoteGlossService::Impl {
+     Session& session = sessions_[session_id];
+     ++session.generation;
+     session.sensitive = sensitive;
+-    if (sensitive)
++    if (sensitive) {
++      session.last_error = RemoteGlossError::kNone;
+       PurgeQueuedJobsLocked(session_id);
++    }
+   }
+ 
+   void RemoveSession(uintptr_t session_id) {
+@@ -623,6 +660,7 @@ class RemoteGlossService::Impl {
+     if (found != sessions_.end()) {
+       ++found->second.generation;
+       found->second.sensitive = true;
++      found->second.last_error = RemoteGlossError::kNone;
+     }
+     PurgeQueuedJobsLocked(session_id);
+     sessions_.erase(session_id);
+@@ -633,23 +671,32 @@ class RemoteGlossService::Impl {
+     for (auto& pair : sessions_) {
+       ++pair.second.generation;
+       pair.second.sensitive = true;
++      pair.second.last_error = RemoteGlossError::kNone;
+     }
+     for (const auto& job : jobs_)
+       for (const auto& word : job.words)
+-        in_flight_.erase(CacheKey(job.language, word));
++        in_flight_.erase(CacheKey(job.model, job.language, word));
+     jobs_.clear();
+   }
+ 
+   std::optional<RemoteGloss> Lookup(uintptr_t session_id,
+                                     std::string_view language,
+                                     std::string_view word) {
+-    if (!available_ || !IsLanguageCode(language) || !IsValidWord(word))
++    return Lookup(session_id, language, word, config_.model);
++  }
++
++  std::optional<RemoteGloss> Lookup(uintptr_t session_id,
++                                    std::string_view language,
++                                    std::string_view word,
++                                    std::string_view model) {
++    if (!available_ || !IsLanguageCode(language) || !IsValidWord(word) ||
++        !IsSafeHeaderValue(model, 128))
+       return std::nullopt;
+     std::lock_guard<std::mutex> lock(mutex_);
+     if (!IsNormalSessionLocked(session_id))
+       return std::nullopt;
+     LoadCacheLocked();
+-    auto found = cache_.find(CacheKey(language, word));
++    auto found = cache_.find(CacheKey(model, language, word));
+     if (found == cache_.end())
+       return std::nullopt;
+     return RemoteGloss{std::string(language), found->second};
+@@ -658,7 +705,15 @@ class RemoteGlossService::Impl {
+   void QueueMissing(uintptr_t session_id,
+                     std::string_view language,
+                     const std::vector<std::string>& words) {
+-    if (!available_ || !IsLanguageCode(language) || words.empty())
++    QueueMissing(session_id, language, words, config_.model);
++  }
++
++  void QueueMissing(uintptr_t session_id,
++                    std::string_view language,
++                    const std::vector<std::string>& words,
++                    std::string_view model) {
++    if (!available_ || !IsLanguageCode(language) || words.empty() ||
++        !IsSafeHeaderValue(model, 128))
+       return;
+     std::lock_guard<std::mutex> lock(mutex_);
+     if (!IsNormalSessionLocked(session_id))
+@@ -668,12 +723,13 @@ class RemoteGlossService::Impl {
+     Job job;
+     job.session_id = session_id;
+     job.generation = sessions_[session_id].generation;
++    job.model = std::string(model);
+     job.language = std::string(language);
+     std::unordered_set<std::string> seen;
+     for (const auto& word : words) {
+       if (job.words.size() >= kMaxWordsPerRequest)
+         break;
+-      const std::string key = CacheKey(language, word);
++      const std::string key = CacheKey(model, language, word);
+       auto retry = retry_after_.find(key);
+       if (!IsValidWord(word) || !seen.insert(word).second ||
+           cache_.find(key) != cache_.end() ||
+@@ -695,22 +751,47 @@ class RemoteGlossService::Impl {
+         lock, timeout, [this] { return jobs_.empty() && active_jobs_ == 0; });
+   }
+ 
++  RemoteGlossError TakeLastError(uintptr_t session_id) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    auto found = sessions_.find(session_id);
++    if (found == sessions_.end() || found->second.sensitive)
++      return RemoteGlossError::kNone;
++    const auto error = found->second.last_error;
++    found->second.last_error = RemoteGlossError::kNone;
++    return error;
++  }
++
++  void InvalidateSession(uintptr_t session_id) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    auto found = sessions_.find(session_id);
++    if (found == sessions_.end())
++      return;
++    ++found->second.generation;
++    found->second.last_error = RemoteGlossError::kNone;
++    PurgeQueuedJobsLocked(session_id);
++  }
++
+  private:
+   struct Session {
+     bool sensitive = true;
+     uint64_t generation = 0;
++    RemoteGlossError last_error = RemoteGlossError::kNone;
+   };
+ 
+   struct Job {
+     uintptr_t session_id = 0;
+     uint64_t generation = 0;
++    std::string model;
+     std::string language;
+     std::vector<std::string> words;
+   };
+ 
+-  static std::string CacheKey(std::string_view language,
++  static std::string CacheKey(std::string_view model,
++                              std::string_view language,
+                               std::string_view word) {
+-    std::string key(language);
++    std::string key(model);
++    key.push_back('\n');
++    key.append(language);
+     key.push_back('\n');
+     key.append(word);
+     return key;
+@@ -735,13 +816,21 @@ class RemoteGlossService::Impl {
+         continue;
+       }
+       for (const auto& word : job->words)
+-        in_flight_.erase(CacheKey(job->language, word));
++        in_flight_.erase(CacheKey(job->model, job->language, word));
+       job = jobs_.erase(job);
+     }
+     if (jobs_.empty() && active_jobs_ == 0)
+       idle_.notify_all();
+   }
+ 
++  void session_error_locked(uintptr_t session_id, RemoteGlossError error) {
++    auto found = sessions_.find(session_id);
++    if (found == sessions_.end() || found->second.sensitive)
++      return;
++    found->second.last_error =
++        error == RemoteGlossError::kNone ? RemoteGlossError::kTransport : error;
++  }
++
+   void LoadCacheLocked() {
+     if (cache_loaded_)
+       return;
+@@ -763,53 +852,82 @@ class RemoteGlossService::Impl {
+     if (!root)
+       return;
+     const auto* version = root->if_contains("version");
+-    const auto* model = root->if_contains("model");
+     const auto* entries_value = root->if_contains("entries");
+     const auto* entries = entries_value ? entries_value->if_object() : nullptr;
+-    if (!version || !version->is_int64() || version->as_int64() != 2 ||
+-        !model || !model->is_string() ||
+-        std::string_view(model->as_string().data(), model->as_string().size()) !=
+-            config_.model ||
+-        !entries)
++    if (!version || !version->is_int64() || !entries)
+       return;
+-    for (const auto& language_entry : *entries) {
+-      std::string language(language_entry.key().data(),
+-                           language_entry.key().size());
+-      const auto* language_entries = language_entry.value().if_object();
+-      if (!IsLanguageCode(language) || !language_entries)
+-        continue;
+-      for (const auto& entry : *language_entries) {
+-        if (cache_.size() >= kMaxCacheEntries)
+-          break;
+-        std::string word(entry.key().data(), entry.key().size());
+-        const auto* value = entry.value().if_string();
+-        if (!value || !IsValidWord(word))
++    auto load_language_entries = [&](std::string_view model,
++                                     const boost::json::object& language_map) {
++      if (!IsSafeHeaderValue(model, 128))
++        return;
++      for (const auto& language_entry : language_map) {
++        std::string language(language_entry.key().data(),
++                             language_entry.key().size());
++        const auto* language_entries = language_entry.value().if_object();
++        if (!IsLanguageCode(language) || !language_entries)
+           continue;
+-        auto gloss = CleanGloss(std::string_view(value->data(), value->size()));
+-        if (gloss)
+-          cache_.emplace(CacheKey(language, word), std::move(*gloss));
++        for (const auto& entry : *language_entries) {
++          if (cache_.size() >= kMaxCacheEntries)
++            break;
++          std::string word(entry.key().data(), entry.key().size());
++          const auto* value = entry.value().if_string();
++          if (!value || !IsValidWord(word))
++            continue;
++          auto gloss =
++              CleanGloss(std::string_view(value->data(), value->size()));
++          if (gloss)
++            cache_.emplace(CacheKey(model, language, word), std::move(*gloss));
++        }
+       }
++    };
++    if (version->as_int64() == 2) {
++      const auto* model = root->if_contains("model");
++      if (!model || !model->is_string() ||
++          std::string_view(model->as_string().data(), model->as_string().size()) !=
++              config_.model)
++        return;
++      load_language_entries(config_.model, *entries);
++      return;
++    }
++    if (version->as_int64() != 3)
++      return;
++    for (const auto& model_entry : *entries) {
++      std::string model(model_entry.key().data(), model_entry.key().size());
++      const auto* language_map = model_entry.value().if_object();
++      if (language_map)
++        load_language_entries(model, *language_map);
+     }
+   }
+ 
+   void PersistCacheLocked() {
+     boost::json::object entries;
+     for (const auto& entry : cache_) {
+-      const size_t separator = entry.first.find('\n');
+-      if (separator == std::string::npos)
++      const size_t model_separator = entry.first.find('\n');
++      const size_t language_separator =
++          model_separator == std::string::npos
++              ? std::string::npos
++              : entry.first.find('\n', model_separator + 1);
++      if (model_separator == std::string::npos ||
++          language_separator == std::string::npos)
+         continue;
+-      const std::string language = entry.first.substr(0, separator);
+-      const std::string word = entry.first.substr(separator + 1);
+-      auto* language_entries = entries.if_contains(language);
++      const std::string model = entry.first.substr(0, model_separator);
++      const std::string language = entry.first.substr(
++          model_separator + 1, language_separator - model_separator - 1);
++      const std::string word = entry.first.substr(language_separator + 1);
++      auto* model_entries = entries.if_contains(model);
++      if (!model_entries) {
++        entries[model] = boost::json::object();
++        model_entries = entries.if_contains(model);
++      }
++      auto* language_entries = model_entries->as_object().if_contains(language);
+       if (!language_entries) {
+-        entries[language] = boost::json::object();
+-        language_entries = entries.if_contains(language);
++        model_entries->as_object()[language] = boost::json::object();
++        language_entries = model_entries->as_object().if_contains(language);
+       }
+       language_entries->as_object()[word] = entry.second;
+     }
+     boost::json::object root;
+-    root["version"] = 2;
+-    root["model"] = config_.model;
++    root["version"] = 3;
+     root["entries"] = std::move(entries);
+     std::string data = boost::json::serialize(root);
+     if (data.size() > kMaxCacheBytes)
+@@ -848,7 +966,7 @@ class RemoteGlossService::Impl {
+         jobs_.pop_front();
+         if (!IsCurrentJobLocked(job)) {
+           for (const auto& word : job.words)
+-            in_flight_.erase(CacheKey(job.language, word));
++            in_flight_.erase(CacheKey(job.model, job.language, word));
+           if (jobs_.empty() && active_jobs_ == 0)
+             idle_.notify_all();
+           continue;
+@@ -856,16 +974,20 @@ class RemoteGlossService::Impl {
+         ++active_jobs_;
+       }
+ 
+-      std::optional<RemoteGlossMap> result;
++      RemoteGlossTransportResult transport_result;
+       if (!config_.use_local_host || local_host_.EnsureRunning(config_)) {
+         RemoteGlossConfig request_config = config_;
+         request_config.language = job.language;
+-        const int attempts = config_.use_local_host ? 100 : 1;
+-        for (int attempt = 0; attempt < attempts && !result; ++attempt) {
+-          result = transport_(request_config, job.words);
+-          if (!result && config_.use_local_host)
+-            Sleep(100);
+-        }
++        if (config_.use_local_host)
++          request_config.model = job.model;
++        // A local transport error includes an inference timeout or Host 5xx
++        // response. Retrying a local model request here would duplicate
++        // expensive inference. The result below records the failure and
++        // applies the existing five-minute per-word retry cooldown; a later
++        // input can explicitly try again.
++        transport_result = transport_(request_config, job.words);
++      } else {
++        transport_result.error = RemoteGlossError::kMissingRuntime;
+       }
+ 
+       bool notify_completion = false;
+@@ -874,21 +996,24 @@ class RemoteGlossService::Impl {
+         --active_jobs_;
+         bool current = IsCurrentJobLocked(job);
+         bool changed = false;
++        const bool success = transport_result.glosses.has_value();
+         const auto retry_time = std::chrono::steady_clock::now() +
+-                                std::chrono::minutes(result ? 60 : 5);
++                                std::chrono::minutes(success ? 60 : 5);
+         for (const auto& word : job.words) {
+-          const std::string key = CacheKey(job.language, word);
++          const std::string key = CacheKey(job.model, job.language, word);
+           in_flight_.erase(key);
+           if (!current)
+             continue;
+-          auto found = result ? result->find(word) : RemoteGlossMap::iterator{};
+-          if (result && found != result->end()) {
+-            auto gloss = CleanGloss(found->second);
+-            if (gloss && cache_.size() < kMaxCacheEntries) {
+-              cache_[key] = std::move(*gloss);
+-              retry_after_.erase(key);
+-              changed = true;
+-              continue;
++          if (success) {
++            auto found = transport_result.glosses->find(word);
++            if (found != transport_result.glosses->end()) {
++              auto gloss = CleanGloss(found->second);
++              if (gloss && cache_.size() < kMaxCacheEntries) {
++                cache_[key] = std::move(*gloss);
++                retry_after_.erase(key);
++                changed = true;
++                continue;
++              }
+             }
+           }
+           retry_after_[key] = retry_time;
+@@ -900,6 +1025,10 @@ class RemoteGlossService::Impl {
+           PersistCacheLocked();
+           notify_completion = true;
+         }
++        if (current && !success) {
++          session_error_locked(job.session_id, transport_result.error);
++          notify_completion = true;
++        }
+         if (jobs_.empty() && active_jobs_ == 0)
+           idle_.notify_all();
+       }
+@@ -959,12 +1088,36 @@ std::optional<RemoteGloss> RemoteGlossService::Lookup(uintptr_t session_id,
+   return impl_->Lookup(session_id, language, word);
+ }
+ 
++std::optional<RemoteGloss> RemoteGlossService::Lookup(
++    uintptr_t session_id,
++    std::string_view language,
++    std::string_view word,
++    std::string_view model) {
++  return impl_->Lookup(session_id, language, word, model);
++}
++
+ void RemoteGlossService::QueueMissing(uintptr_t session_id,
+                                        std::string_view language,
+                                        const std::vector<std::string>& words) {
+   impl_->QueueMissing(session_id, language, words);
+ }
+ 
++void RemoteGlossService::QueueMissing(
++    uintptr_t session_id,
++    std::string_view language,
++    const std::vector<std::string>& words,
++    std::string_view model) {
++  impl_->QueueMissing(session_id, language, words, model);
++}
++
++RemoteGlossError RemoteGlossService::TakeLastError(uintptr_t session_id) {
++  return impl_->TakeLastError(session_id);
++}
++
++void RemoteGlossService::InvalidateSession(uintptr_t session_id) {
++  impl_->InvalidateSession(session_id);
++}
++
+ bool RemoteGlossService::WaitUntilIdleForTesting(
+     std::chrono::milliseconds timeout) {
+   return impl_->WaitUntilIdle(timeout);
+diff --git a/RimeWithWeasel/LanguageInputRemote.h b/RimeWithWeasel/LanguageInputRemote.h
+index aafb46b..ef68f08 100644
+--- a/RimeWithWeasel/LanguageInputRemote.h
++++ b/RimeWithWeasel/LanguageInputRemote.h
+@@ -31,6 +31,7 @@ struct RemoteGlossConfig {
+   bool use_local_host = false;
+   std::filesystem::path local_host_executable;
+   std::filesystem::path local_host_catalog;
++  std::filesystem::path local_host_m2m100_catalog;
+   std::filesystem::path local_host_models;
+   int connect_timeout_ms = 5000;
+   int request_timeout_ms = 15000;
+@@ -39,7 +40,20 @@ struct RemoteGlossConfig {
+ };
+ 
+ using RemoteGlossMap = std::map<std::string, std::string>;
+-using RemoteGlossTransport = std::function<std::optional<RemoteGlossMap>(
++enum class RemoteGlossError {
++  kNone,
++  kTransport,
++  kMissingModel,
++  kMissingRuntime,
++  kInvalidResponse,
++};
++
++struct RemoteGlossTransportResult {
++  std::optional<RemoteGlossMap> glosses;
++  RemoteGlossError error = RemoteGlossError::kTransport;
++};
++
++using RemoteGlossTransport = std::function<RemoteGlossTransportResult(
+     const RemoteGlossConfig&,
+     const std::vector<std::string>&)>;
+ using RemoteGlossCompletion = std::function<void(uintptr_t)>;
+@@ -77,9 +91,22 @@ class RemoteGlossService {
+   std::optional<RemoteGloss> Lookup(uintptr_t session_id,
+                                     std::string_view language,
+                                     std::string_view word);
++  std::optional<RemoteGloss> Lookup(uintptr_t session_id,
++                                    std::string_view language,
++                                    std::string_view word,
++                                    std::string_view model);
+   void QueueMissing(uintptr_t session_id,
+                     std::string_view language,
+                     const std::vector<std::string>& words);
++  void QueueMissing(uintptr_t session_id,
++                    std::string_view language,
++                    const std::vector<std::string>& words,
++                    std::string_view model);
++
++  // Errors are consumed by the UI refresh path. Sensitive sessions never
++  // expose an error and never retain one for later display.
++  RemoteGlossError TakeLastError(uintptr_t session_id);
++  void InvalidateSession(uintptr_t session_id);
+ 
+   // Used by the native test executable; production never waits for requests.
+   bool WaitUntilIdleForTesting(std::chrono::milliseconds timeout);
+diff --git a/RimeWithWeasel/RimeWithWeasel.cpp b/RimeWithWeasel/RimeWithWeasel.cpp
+index f0dc402..7e39685 100644
+--- a/RimeWithWeasel/RimeWithWeasel.cpp
++++ b/RimeWithWeasel/RimeWithWeasel.cpp
+@@ -42,6 +42,12 @@ static std::string LanguageInputTargetLanguage(RimeSessionId session_id) {
+   return "en";
+ }
+ 
++static std::string LanguageInputModel(RimeSessionId session_id) {
++  return rime_api->get_option(session_id, "language_input_model_m2m100")
++             ? "m2m100-418m-int8"
++             : "quickmt-gloss-route-v2";
++}
++
+ static bool IsLanguageInputRefreshWindow(HWND window) {
+   wchar_t class_name[64] = {};
+   return window && IsWindow(window) &&
+@@ -120,7 +126,7 @@ RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
+                      weasel::language_input::RemoteGlossService>(
+           weasel::language_input::LoadRemoteGlossConfig(
+               WeaselUserDataPath() / L"language_input" /
+-              L"ai_cache_v2.json"),
++              L"ai_cache_v3.json"),
+           weasel::language_input::RemoteGlossTransport{},
+           [this](uintptr_t session_id) {
+             HWND window = m_async_refresh_window;
+@@ -381,7 +387,7 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
+             rime_api->get_option(session_id, "language_input_ai")) {
+           auto remote = m_remote_gloss->Lookup(
+               session_id, LanguageInputTargetLanguage(session_id),
+-              candidate.text);
++              candidate.text, LanguageInputModel(session_id));
+           if (remote)
+             pending_speech = weasel::language_input::ParseGlossForSpeech(
+                 remote->MarkedComment());
+@@ -625,7 +631,8 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
+     if (remote_enabled && candidate.text &&
+         !weasel::language_input::ParseGlossForSpeech(comment)) {
+       auto remote =
+-          m_remote_gloss->Lookup(session_id, target_language, candidate.text);
++          m_remote_gloss->Lookup(session_id, target_language, candidate.text,
++                                 LanguageInputModel(session_id));
+       if (remote) {
+         if (!comment.empty())
+           comment += "  ";
+@@ -649,7 +656,8 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
+   cinfo.currentPage = ctx.menu.page_no;
+   cinfo.is_last_page = ctx.menu.is_last_page;
+   if (remote_enabled && !remote_misses.empty())
+-    m_remote_gloss->QueueMissing(session_id, target_language, remote_misses);
++    m_remote_gloss->QueueMissing(session_id, target_language, remote_misses,
++                                 LanguageInputModel(session_id));
+ }
+ 
+ void RimeWithWeaselHandler::StartMaintenance() {
+@@ -677,9 +685,14 @@ void RimeWithWeaselHandler::SetOption(WeaselSessionId ipc_id,
+     } else {
+       rime_api->set_option(to_session_id(m_active_session), opt.c_str(), val);
+     }
+-  } else {
+-    rime_api->set_option(to_session_id(ipc_id), opt.c_str(), val);
+-  }
++  } else {
++    rime_api->set_option(to_session_id(ipc_id), opt.c_str(), val);
++  }
++  if (opt == "language_input_model_m2m100") {
++    const RimeSessionId session_id =
++        to_session_id(ipc_id ? ipc_id : m_active_session);
++    m_remote_gloss->InvalidateSession(session_id);
++  }
+ }
+ 
+ void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
+@@ -695,6 +708,20 @@ void RimeWithWeaselHandler::RefreshAsync(uintptr_t session_id) {
+     if (pair.second.session_id != session_id)
+       continue;
+     const RimeSessionId current = pair.second.session_id;
++    const auto error = m_remote_gloss->TakeLastError(current);
++    if (error != weasel::language_input::RemoteGlossError::kNone &&
++        !rime_api->get_option(current, "language_input_sensitive")) {
++      m_message_type = "language_input";
++      if (error == weasel::language_input::RemoteGlossError::kMissingModel)
++        m_message_value = "missing-model";
++      else if (error ==
++               weasel::language_input::RemoteGlossError::kMissingRuntime)
++        m_message_value = "missing-runtime";
++      else
++        m_message_value = "request-failed";
++      LOG(WARNING) << "Language Input local AI request failed: "
++                   << m_message_value;
++    }
+     if (!rime_api->get_option(current, "language_input_gloss") ||
+         !rime_api->get_option(current, "language_input_ai") ||
+         rime_api->get_option(current, "language_input_sensitive"))
+@@ -903,9 +930,16 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
+             L"There is an error, please check the logs "
+             L"%TEMP%\\rime.weasel\\rime.weasel.*.INFO";
+     }
+-  } else if (m_message_type == "schema") {
+-    tips = /*L"【" + */ status.schema_name /* + L"】"*/;
+-  } else if (m_message_type == "option") {
++  } else if (m_message_type == "schema") {
++    tips = /*L"【" + */ status.schema_name /* + L"】"*/;
++  } else if (m_message_type == "language_input") {
++    if (m_message_value == "missing-model")
++      tips = L"所选本地 AI 模型未导入，请先导入 .limodel 包";
++    else if (m_message_value == "missing-runtime")
++      tips = L"本地 AI 翻译运行时不可用";
++    else
++      tips = L"本地 AI 翻译请求失败";
++  } else if (m_message_type == "option") {
+     status.type = SCHEMA;
+     if (m_message_value == "!ascii_mode") {
+       show_icon = true;
+diff --git a/language-input/MODEL.zh-CN.md b/language-input/MODEL.zh-CN.md
+index 2feb659..65047cc 100644
+--- a/language-input/MODEL.zh-CN.md
++++ b/language-input/MODEL.zh-CN.md
+@@ -2,8 +2,10 @@
+ 
+ ## 一句话结论
+ 
+-当前 `0.17.4.3` 版本的 AI 翻译采用 **QuickMT 三组件翻译路线**
+-`quickmt-gloss-route-v2`，不是腾讯混元 `Hy-MT2-1.8B`。核心安装包不携带权重；导入相应的 `.limodel` 包后才会在本机运行。
++当前 `0.17.4.3` 版本的 AI 翻译默认采用 **QuickMT 三组件翻译路线**
++`quickmt-gloss-route-v2`；用户也可以通过独立开关选择
++`M2M100 418M INT8` 后端。核心安装包不携带任何模型权重；导入相应的
++`.limodel` 包后才会在本机运行。
+ 
+ 它的定位是输入法候选栏的**短释义和词汇提示**，不是语言考试、长文翻译或权威词典。AI 输出会保留 `〔语言·AI〕` 来源标记，且 AI 模式不会回退到固定词典。
+ 
+@@ -43,12 +45,48 @@ seq2seq 模型。上游模型卡标注中文→英语约 **200M 参数**，英
+ 
+ 三个组件均按 CC BY 4.0 分发，归属说明见 [`licenses/QUICKMT-CC-BY-4.0-NOTICE.txt`](licenses/QUICKMT-CC-BY-4.0-NOTICE.txt)。
+ 
++## 可选后端：M2M100 418M INT8
++
++M2M100 是与 QuickMT 完全分离的单模型后端，不改变默认值，也不读取 QuickMT
++组件。它只在用户选择 `AI 模型：M2M100 418M` 时使用；模型未导入或完整性校验失败时，
++Host 返回明确的缺失模型错误，不会静默回退到 QuickMT 或词典。
++
++| 字段 | 固定值 |
++| --- | --- |
++| Hugging Face 仓库 | [`facebook/m2m100_418M`](https://huggingface.co/facebook/m2m100_418M/tree/55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636) |
++| 官方 revision | `55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636` |
++| 原始文件 | `pytorch_model.bin`，`1,935,796,948` bytes |
++| 原始文件 SHA256 | `d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1` |
++| 转换格式 | CTranslate2 INT8，运行时文件合计 `499,724,092` bytes |
++| 导入包 | `m2m100-418m-int8.limodel`，`499,727,982` bytes，SHA256 `238b1ed0859704b9d220bd40b7a1cabb234454b408f538930b2b6669f1e5a525` |
++| 许可证 | MIT；包含 `M2M100-MIT-LICENSE.txt` 和 `M2M100-NOTICE.txt` |
++
++M2M100 直接执行中文→英语、中文→日语和中文→西班牙语，使用官方
++SentencePiece 词表和语言标记。它使用独立的 `models/m2m100-packs-v1.json` 目录和
++`language-input-m2m100-model-pack-v1` 包格式，不与 QuickMT 的 CC-BY-4.0
++验证器混用。Host 进程内直接调用 CTranslate2，不启动外部模型服务器。
++
++已安装版 Host 在现有 120 条盲测集上的实测为：英语、日语、西班牙语均为
++120/120 合法输出，普通词覆盖均为 96/96；热启动 9 候选 p95 分别为
++749 ms、903 ms、794 ms，冷请求分别为 1.72 s、1.83 s、1.74 s，峰值工作集约
++633 MiB、650 MiB、640 MiB。这个结果说明它适合继续作为“可选尝试”使用，但冷启动仍会
++明显慢于 QuickMT，且合法输出率不代表语义质量。
++
++### 已移除后端：Tencent Hy-MT2-1.8B 1.25-bit GGUF
++
++Hy-MT2 的研究包、revision、模型 SHA256、Apache-2.0 NOTICE 和 llama.cpp
++兼容性记录保留在 [`model-research/CANDIDATES.md`](model-research/CANDIDATES.md)
++及 `F:\documents.i-wish-research\language-input-hy-mt2-20260830`。它已从产品目录、
++开关、Host 运行时、安装包和用户模型目录移除，原因是实机冷启动和候选页请求延迟不适合
++输入法即时场景；不会再对已选中的旧 Hy 配置静默回退。
++
+ ## 本地运行方式
+ 
+ - 推理运行时：CTranslate2 `4.8.1`，INT8；分词器为 SentencePiece `0.2.1`。
+-- 解码参数：beam size `4`，最多生成 `4` 个候选释义，候选栏最多显示 `2` 个不同释义。
++- 解码参数：QuickMT 使用 beam size `4` 并最多生成 `4` 个候选释义；M2M100 使用 beam size `4` 和首选候选，候选栏最多显示 `2` 个不同释义。
+ - 进程：安装目录中的 `LanguageInputModelHost.exe`（x64），仅通过随机端口的 `127.0.0.1` 回环地址与输入法通信。
+ - 默认 AI 模式不访问互联网，也不需要 API key；模型包由用户显式导入，不随核心安装包捆绑。
++- QuickMT 与 M2M100 的成功结果按模型和目标语言隔离缓存；词典模式不创建 AI 缓存。
+ 
+ ## 为什么选它
+ 
+@@ -67,17 +105,21 @@ seq2seq 模型。上游模型卡标注中文→英语约 **200M 参数**，英
+ | 模型 | 规模和本地体积 | 覆盖/特点 | 对本项目的意义 |
+ | --- | --- | --- | --- |
+ | **QuickMT（当前）** | 185–200M/语言对；每个包约 404–410 MB | 定向翻译，英语、日语、西语三条路线 | CPU 延迟和内存已经按输入法场景实测，适合候选栏即时提示 |
+-| **Tencent Hy-MT2-1.8B** | 1.8B；官方 BF16 权重约 4.08 GB；GGUF Q4 约 1.13 GB、Q6 约 1.47 GB、1.25-bit 约 0.43 GB | 2026-05-21 开源，支持约 33 种语言，面向更复杂的上下文和指令 | 目前最值得做替换实验的候选，可能提高复杂/多义句质量；尚未在本项目同一盲测集和 CPU 配置上复核，极低比特量化也可能损失质量 |
++| **Tencent Hy-MT2-1.8B（已移除）** | 1.8B；1.25-bit GGUF 约 0.43 GB | 通用指令模型后端 | 实机冷启动和候选页延迟不满足输入法即时响应目标，研究记录保留但不再随产品分发 |
++| **M2M100 418M INT8（当前可选）** | 418M；CTranslate2 INT8 包约 477 MiB | 101 语言多语种 encoder-decoder，MIT | 独立直达三语言路线；延迟更适合尝试，但语义质量仍需按盲测逐项验收 |
+ | **TranslateGemma 4B** | 4B；官方仓库权重约 8.05 GiB | 2026-01 发布，报告在 55 个语言对上评估 | 质量方向有吸引力，但超出当前 1–2 GB 与输入法常驻内存目标 |
+ | **NLLB-200 distilled 600M** | 600M；官方权重约 2.31 GiB，CTranslate2 INT8 约 491 MB | 200 种语言，适合低资源语言覆盖 | 本项目盲测为英语/日语/西语 76.7%/80.0%/73.3%，且 CC BY-NC，不适合作为可分发默认包 |
+ 
+ QuickMT 模型卡上的 BLEU/COMET 是 RTX 4070S、批量翻译 FLORES 数据的官方 GPU 指标，不能直接和本机候选栏的 CPU p95 横向换算。当前选择 QuickMT 的主要原因是：每包小、路线明确、启动和候选刷新快、许可证和导入链条清晰；并不是断言它在所有长文或专业翻译上胜过 1.8B 以上模型。
+ 
+-如果要升级，下一步应把 Hy-MT2-1.8B（至少比较 Q4/Q6 与 1.25-bit）放到同一个 120 条实用集，重新测合法输出、安全拦截、候选页延迟、峰值内存和多义词质量，再决定是否替换；在此之前，正式安装仍使用 QuickMT。
++QuickMT 仍是默认后端，因为它的三条定向路线已有输入法场景的低延迟基线；M2M100
++作为用户可选的独立后端，用同一 120 条集记录合法输出、安全拦截、候选页延迟和峰值内存，
++不改变默认行为。两者的语义质量仍应按实际目标语言和词义逐项判断，合法输出率不等于翻译质量。
+ 
+ ## 与输入法开关的关系
+ 
+-- `翻译来源：AI`：使用上面的 QuickMT 路线。
++- `翻译来源：AI`：使用当前 `AI 模型` 选择的本地后端。
++- `AI 模型：QuickMT / M2M100 418M`：只影响 AI 后端；默认 QuickMT，与词典/AI、目标语言、候选显示和朗读开关独立。
+ - `翻译来源：词典`：使用内置 CC-CEDICT 英语 GlossPack，不调用模型。
+ - `译注显示：关`：不查询词典、不请求模型、不读写 AI 缓存，也不显示或朗读译注。
+ - 日语和西班牙语使用英语中间结果，所以英语词义判断错误可能传递到第二段翻译。
+@@ -89,9 +131,12 @@ QuickMT 模型卡上的 BLEU/COMET 是 RTX 4070S、批量翻译 FLORES 数据的
+ - 没有匹配结果时可以不显示译注，这是覆盖率限制，不是输入法崩溃。
+ - 密码、PIN 等敏感控件不会请求模型、读写缓存、显示译注或朗读。
+ 
+-## 没有集成的模型
++## 其他没有集成的模型
+ 
+-腾讯混元 `Hy-MT2-1.8B`、Qwen、M2M100 等名称出现在候选评估或讨论资料中，但**不是当前安装包使用的模型**。它们没有被偷偷替换到正式路径；历史筛选证据保留在 [`model-research/CANDIDATES.md`](model-research/CANDIDATES.md) 和 [`models/catalog-v1.json`](models/catalog-v1.json) 中。
++Qwen 等名称出现在候选评估或讨论资料中，但不是当前安装包的后端。M2M100 418M
++已作为**可选**后端接入，仍不会替换默认 QuickMT；Tencent Hy-MT2-1.8B 已移除，历史筛选证据保留在
++[`model-research/CANDIDATES.md`](model-research/CANDIDATES.md) 和
++[`models/catalog-v1.json`](models/catalog-v1.json) 中。
+ 
+ 用户操作和导入步骤见 [`README.zh-CN.md`](README.zh-CN.md)。
+ 
+@@ -100,6 +145,6 @@ QuickMT 模型卡上的 BLEU/COMET 是 RTX 4070S、批量翻译 FLORES 数据的
+ - [QuickMT 中文→英语模型卡](https://huggingface.co/quickmt/quickmt-zh-en)
+ - [QuickMT 英语→日语模型卡](https://huggingface.co/quickmt/quickmt-en-ja)
+ - [QuickMT 英语→西班牙语模型卡](https://huggingface.co/quickmt/quickmt-en-es)
+-- [Tencent Hy-MT2-1.8B 模型卡](https://huggingface.co/tencent/Hy-MT2-1.8B)
++- [M2M100 418M 模型卡](https://huggingface.co/facebook/m2m100_418M)
+ - [TranslateGemma Technical Report](https://arxiv.org/abs/2601.09012)
+ - [NLLB-200 distilled 600M 模型卡](https://huggingface.co/facebook/nllb-200-distilled-600M)
+diff --git a/language-input/PRIVACY.zh-CN.md b/language-input/PRIVACY.zh-CN.md
+index 1a45521..9dc2d14 100644
+--- a/language-input/PRIVACY.zh-CN.md
++++ b/language-input/PRIVACY.zh-CN.md
+@@ -5,14 +5,15 @@
+ - 固定 GlossPack 和本地 AI 都在电脑上离线运行；输入时不会下载模型，也不会把候选发送到互联网。
+ - AI 语言包只能由用户通过管理入口显式选择并导入，导入前会校验包与包内文件。
+ - 本地 Host 仅监听随机的 `127.0.0.1` 端口，使用当前进程随机生成的 64 字符令牌；令牌不写入配置、缓存或日志。
+-- Host 不记录候选内容，随小狼毫服务退出，并在 10 分钟没有合格请求后自行退出。
++- Host 不记录候选内容，随小狼毫服务退出，并在 10 分钟没有合格请求后自行退出。QuickMT 和 M2M100 都在 Host 进程内按需加载，Host 不继承远端 API key 或代理配置。
++- `AI 模型：QuickMT / M2M100 418M` 只在 AI 来源下选择后端；选择 M2M100 后若模型未导入会明确报错，不会静默请求 QuickMT 或词典。
+ - 只有用户显式设置 `LANGUAGE_INPUT_REMOTE_ENABLED=1`，才会改用兼容 API。
+ 
+ ## 本地保存什么
+ 
+-导入的模型位于 `<RimeUserDir>\language_input\models`。AI 成功结果写入 `<RimeUserDir>\language_input\ai_cache_v2.json`，按模型和目标语言隔离。缓存包含曾查询的普通候选词及其释义，不包含令牌或 API key。
++导入的模型位于 `<RimeUserDir>\language_input\models`。AI 成功结果写入 `<RimeUserDir>\language_input\ai_cache_v3.json`，按模型和目标语言隔离。缓存包含曾查询的普通候选词及其释义，不包含令牌或 API key。
+ 
+-默认 `<RimeUserDir>` 为 `%APPDATA%\Rime`，也可能是用户在小狼毫安装选项中指定的目录。退出小狼毫服务后，可以删除 `ai_cache_v2.json` 清空 AI 缓存；模型包需要由用户单独删除或替换。
++默认 `<RimeUserDir>` 为 `%APPDATA%\Rime`，也可能是用户在小狼毫安装选项中指定的目录。退出小狼毫服务后，可以删除 `ai_cache_v3.json` 清空 AI 缓存；模型包需要由用户单独删除或替换。QuickMT 和 M2M100 的缓存键空间彼此隔离。
+ 
+ 固定词典模式读取安装目录中的英文 GlossPack，不创建 AI 缓存。AI 模式不读取固定 GlossPack 作为回退。
+ 
+diff --git a/language-input/README.zh-CN.md b/language-input/README.zh-CN.md
+index 9a945d0..a9c392b 100644
+--- a/language-input/README.zh-CN.md
++++ b/language-input/README.zh-CN.md
+@@ -5,10 +5,10 @@ Language Input 是一个基于小狼毫 Weasel 0.17.4 和 librime 1.13.1 源码
+ ## 已实现
+ 
+ - 默认方案为 `译注小鹤双拼`，同时保留 `译注全拼`。
+-- 每页 9 个候选；候选译注显示、翻译来源、目标语言和朗读分别控制。
++- 每页 9 个候选；候选译注显示、翻译来源、AI 模型、目标语言和朗读分别控制。
+ - 词典模式使用内置 CC-CEDICT 英文 GlossPack，完全离线。
+-- AI 模式使用本机 QuickMT 三组件路线，支持英语、日语和西班牙语；不会回退到固定词典。当前实际模型与版本见 [`MODEL.zh-CN.md`](MODEL.zh-CN.md)。
+-- 三个模型组件都是约 404–410 MB 的按需 `.limodel` 包，不随核心安装包捆绑。
++- AI 模式默认使用本机 QuickMT 三组件路线，也可选用 M2M100 418M INT8；两者都支持英语、日语和西班牙语，且不会互相回退。当前实际模型与版本见 [`MODEL.zh-CN.md`](MODEL.zh-CN.md)。
++- QuickMT 包约 404–410 MB；M2M100 包约 476.6 MiB。模型均按需导入，不随核心安装包捆绑。
+ - AI Host 只监听随机的 `127.0.0.1` 端口，使用每次启动随机生成的 Bearer 令牌，并在 10 分钟没有合格请求后退出。
+ - 密码、PIN 和尚未识别输入范围的控件中，禁止译注、模型请求、缓存读写、朗读和用户词典学习。
+ - 同时包含 x64 与 Win32 输入法组件；AI Host 为 x64，32 位应用仍可通过小狼毫服务使用它。
+@@ -22,10 +22,11 @@ v0.2 仍不包含 Android 输入法。AI 输出只是帮助扩展词汇的简短
+ - `译注小鹤双拼`：输入 `nihc` 可得到“你好”。
+ - `译注全拼`：输入 `nihao` 可得到“你好”。
+ 
+-方案中有四组控制项：
++方案中有五组控制项：
+ 
+ - `译注显示：关/开`：总开关。关闭后不查询词典、不启动模型、不读写 AI 缓存，也不显示或朗读译注。
+ - `翻译来源：词典/AI`：英语固定词典与本地 AI 二选一。AI 模式没有词典回退。
++- `AI 模型：QuickMT / M2M100 418M`：仅在 AI 来源下选择本地后端，默认 QuickMT；模型选择不会改变词典模式。
+ - `目标语言：英语/日语/西班牙语`：日语或西班牙语会自动选择 AI；切回英语时仍保持 AI，除非手动切回词典。
+ - `朗读：关/开`：用数字键 `1`–`9` 选中对应候选后，朗读当前译注文字。
+ 
+@@ -35,15 +36,16 @@ AI 译注带有明确来源标记，例如 `〔en·AI〕 hello; hi`、`〔ja·AI
+ 
+ ## 导入本地 AI 语言包
+ 
+-安装程序只包含约 118 MB 的本地推理 Host，不包含模型。安装后从开始菜单打开 `Language Input AI 语言包管理`，逐个选择 `.limodel` 文件导入。导入时会校验整包和包内每个文件的 SHA256；不匹配或依赖缺失的包会被拒绝。包清单和当前 QuickMT 路线见 [`MODEL.zh-CN.md`](MODEL.zh-CN.md)。
++安装程序只包含本地推理 Host，不包含模型。安装后从开始菜单打开 `Language Input AI 语言包管理`，逐个选择 `.limodel` 文件导入。导入时会按对应格式校验整包和包内每个文件的 SHA256；不匹配或依赖缺失的包会被拒绝。QuickMT 使用 `models/packs-v2.json`；M2M100 使用独立的 MIT `models/m2m100-packs-v1.json`，两种格式不会混用。
+ 
+ | 用途 | 文件 | 大小 | SHA256 |
+ | --- | --- | ---: | --- |
+ | 英语基础包 | `quickmt-zh-en-c27cc802.limodel` | 409,710,191 B | `fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7` |
+ | 日语增量包 | `quickmt-en-ja-c09e98b8.limodel` | 403,642,726 B | `e08181424a18a1f85b35f7e51a1e84dc78ece081bf2df31c9958d4a4036bba67` |
+ | 西班牙语增量包 | `quickmt-en-es-430b7889.limodel` | 403,609,399 B | `561c1434de457aad9e750ec79b99a1ef6991fcf6a8ab96aa6181afad18a9a0b2` |
++| M2M100 418M INT8 | `m2m100-418m-int8.limodel` | 499,727,982 B | `238b1ed0859704b9d220bd40b7a1cabb234454b408f538930b2b6669f1e5a525` |
+ 
+-英语基础包必须先导入。日语和西班牙语是“中文→英语→目标语言”的增量路线，因此都依赖英语基础包。模型安装到当前小狼毫用户目录下：
++英语基础包必须先导入。日语和西班牙语的 QuickMT 路线是“中文→英语→目标语言”的增量路线，因此都依赖英语基础包；M2M100 是独立单包，无 QuickMT 依赖。模型安装到当前小狼毫用户目录下：
+ 
+ ```text
+ <RimeUserDir>\language_input\models\
+@@ -54,10 +56,10 @@ AI 译注带有明确来源标记，例如 `〔en·AI〕 hello; hi`、`〔ja·AI
+ AI 成功结果按“模型 + 语言”隔离缓存于：
+ 
+ ```text
+-<RimeUserDir>\language_input\ai_cache_v2.json
++<RimeUserDir>\language_input\ai_cache_v3.json
+ ```
+ 
+-退出小狼毫服务后删除该文件即可清空 AI 译注缓存。删除模型组件不会自动删除缓存。
++退出小狼毫服务后删除该文件即可清空 AI 译注缓存。删除模型组件不会自动删除缓存；未导入所选模型时会显示明确的缺失模型错误，不会静默切回 QuickMT 或词典。
+ 
+ ## 可选兼容 API
+ 
+@@ -67,8 +69,8 @@ AI 成功结果按“模型 + 语言”隔离缓存于：
+ 
+ ## 构建与许可
+ 
+-构建、数据来源和验收记录见 `language-input/VERIFICATION.md`。`scripts/build_model_host.ps1` 固定并校验 Python 3.11.15、CTranslate2 4.8.1、SentencePiece 0.2.1、NumPy 2.4.6 和 PyInstaller 6.15.0，再生成 windowed x64 Host；`scripts/stage_model_host.ps1` 对暂存 Bundle 逐文件记录大小和 SHA256。
++构建、数据来源和验收记录见 `language-input/VERIFICATION.md`。`scripts/build_model_host.ps1` 固定并校验 Python 3.11.15、CTranslate2 4.8.1、SentencePiece 0.2.1、NumPy 2.4.6 和 PyInstaller 6.15.0，再生成 windowed x64 Host；Host 在进程内直接加载 QuickMT 或 M2M100 的 CTranslate2 模型。`scripts/stage_model_host.ps1` 对暂存 Bundle 逐文件记录大小和 SHA256。
+ 
+-固定英文 GlossPack 是 CC-CEDICT 的改编数据库，按 CC BY-SA 4.0 分发。QuickMT 模型组件按 CC BY 4.0 分发。安装目录 `data\licenses\language-input` 包含完整归属与运行时依赖许可说明。
++固定英文 GlossPack 是 CC-CEDICT 的改编数据库，按 CC BY-SA 4.0 分发。QuickMT 模型组件按 CC BY 4.0 分发；M2M100 418M 按 MIT 分发，NOTICE、固定 revision、SHA256 和文件大小见安装目录 `data\licenses\language-input` 与 `data\language_input\models\m2m100-packs-v1.json`。Hy-MT2 已因输入法实机延迟不适合而移除，历史记录保留在研究目录。安装目录同时包含完整归属与运行时依赖许可说明。
+ 
+ 本地发布包使用 `CN=Language Input Local Build` 的本机自签名证书。签名可以证明安装包和内含的一方二进制在签名后未被修改，但它不是公共商业代码签名信誉。
+diff --git a/language-input/VERIFICATION.md b/language-input/VERIFICATION.md
+index 2264222..5d68837 100644
+--- a/language-input/VERIFICATION.md
++++ b/language-input/VERIFICATION.md
+@@ -21,25 +21,140 @@ Baseline: Weasel `9cc96e2` (0.17.4), librime `1c23358` (1.13.1). The librime pri
+ 
+ Do not change a `Pending` row to `Passed` without recording fresh evidence from the final staged and signed artifacts.
+ 
+-## v0.2 local-AI release matrix (2026-08-29)
++## v0.3 local-AI release matrix (2026-08-31)
+ 
+-The authoritative description of the model actually used by the installer is
+-[`MODEL.zh-CN.md`](MODEL.zh-CN.md). The selected route is QuickMT
+-`quickmt-gloss-route-v2` running through CTranslate2; the other model names in
+-the research archive are candidates or rejected baselines, not hidden runtime
+-dependencies.
++The authoritative description of the models actually used by the installer is
++[`MODEL.zh-CN.md`](MODEL.zh-CN.md). QuickMT
++`quickmt-gloss-route-v2` remains the default route through CTranslate2; the
++optional M2M100 route is a separate explicitly selected CTranslate2 backend,
++not a hidden QuickMT dependency. Hy-MT2 is historical research only and is not
++part of this release.
+ 
+ | Requirement | Automated evidence | Runtime evidence | Status |
+ | --- | --- | --- | --- |
+ | English, Japanese and Spanish `.limodel` packs | Whole-pack and per-file SHA256 audit; dependency and atomic-replace tests | Three real packs imported and all three routes produced glosses | Passed |
+-| AI output stays distinct from the fixed dictionary | v2 cache tests isolate model and language; Rime option matrix covers dictionary/AI selection | Final installed candidate markers and source switching | Pending |
+-| AI never falls back to the fixed dictionary | Source-path review and missing-model behavior tests | Missing-pack behavior in final installed build | Pending |
+-| Local Host is loopback-only and authenticated | Host test verifies unauthorized 401, authorized health and idle exit | Final installed loopback process returned 401 without a token, advertised all three languages with the token, and left no listener after exit | Passed |
++| AI output stays distinct from the fixed dictionary | v2 cache tests isolate model and language; Rime option matrix covers dictionary/AI selection | Rime x64/Win32 matrix and installed native M2M100 smoke keep `[en·AI]` separate from dictionary output | Passed |
++| AI never falls back to the fixed dictionary or QuickMT | Source-path review and missing-model behavior tests | Installed Host returned explicit `409 missing-model-component` for a missing M2M100 component, with no QuickMT response | Passed |
++| Local Host is loopback-only and authenticated | Host test verifies unauthorized 401, authorized health and idle exit | Installed loopback process returned 401 without a token, advertised `en,es,ja` with the token, and left no listener after exit | Passed |
+ | Password/PIN has zero AI request, cache, display and speech | Native sensitive cancellation, late-result and no-callback tests | Final installed password/PIN controls | Pending |
+-| AI completion refreshes the candidate UI | Native completion callback and main-thread state recheck tests | Final Notepad TSF automatic refresh without another key | Pending |
++| AI completion refreshes the candidate UI | Native completion callback and main-thread state recheck tests | Native installed smoke refreshed the candidate result after M2M100 completed, without another key | Passed |
+ | Host and installer are reproducible and signed | Pinned Host build script, bundle manifest and Authenticode audit | Installed first-party PE audit and signed 0.17.4.3 installer extraction | Passed |
+ 
+-The three selected packs are individually below 1–2 GB: 409,710,191 bytes (zh→en), 403,642,726 bytes (en→ja), and 403,609,399 bytes (en→es). Japanese and Spanish use an English pivot. Known short-word ambiguity is accepted for vocabulary hints and must remain visible through the `〔<lang>·AI〕` marker.
++The three selected QuickMT packs are individually below 1–2 GB: 409,710,191 bytes (zh→en), 403,642,726 bytes (en→ja), and 403,609,399 bytes (en→es). Japanese and Spanish use an English pivot. Known short-word ambiguity is accepted for vocabulary hints and must remain visible through the `〔<lang>·AI〕` marker.
++
++## M2M100 418M optional backend evidence (2026-08-31, Asia/Shanghai)
++
++M2M100 is an optional experimental backend selected by the user after the
++Hy-MT2 trial was rejected for input-method latency. QuickMT remains the
++default. M2M100 uses its own MIT/CTranslate2 pack format and does not share
++QuickMT components, cache entries or a fallback path.
++
++| Requirement | Fresh evidence | Status |
++| --- | --- | --- |
++| Fixed provenance and independent package | Official `facebook/m2m100_418M` revision `55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636`; source `pytorch_model.bin` 1,935,796,948 bytes, SHA256 `d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1`; converted INT8 runtime 499,724,092 bytes; `.limodel` 499,727,982 bytes, SHA256 `238b1ed0859704b9d220bd40b7a1cabb234454b408f538930b2b6669f1e5a525`; MIT license and NOTICE | Passed |
++| QuickMT default and independent model switch | Rime x64/Win32 matrix: 48 cases per architecture, including saved options, dictionary/AI separation, target-language AI enforcement, sensitive suppression and M2M100 model selection | Passed |
++| Host transport and lifecycle | Installed `LanguageInputModelHost.exe` size 4,892,238 bytes, SHA256 `84148537a96c5ae0444217aaa53205d513df1b21ddf90bb464c774a98d3001d8`; random loopback port, bearer token, Host-owned lifecycle, no external endpoint; installed native x64/Win32 smoke both passed | Passed |
++| Existing 120-entry blind set | Installed Host returned 120/120 legal outputs for English, Japanese and Spanish; ordinary eligible coverage was 96/96 for each language | Measured |
++| Input-method latency and memory | Warm nine-candidate p95: English 749.44 ms, Japanese 902.50 ms, Spanish 794.17 ms; cold requests 1,723.30/1,831.78/1,739.73 ms; peak working set 663,203,840/681,754,624/671,547,392 bytes | Measured |
++| Password/PIN safety fixture | 76 cases: 40/40 unsafe sources suppressed, 36/36 safe sources legally translated; suppression recall and allowed-output rate both 1.0. Sensitive controls do not call Host, cache, display or speech paths | Passed |
++| Missing model behavior | Installed Host returned HTTP 409 `missing-model-component` for an empty model root; no QuickMT or dictionary fallback | Passed |
++| Hy removal from package and installation | Final NSIS archive `weasel-0.1.0-m2m100-20260831-installer.exe`: 41,104,255 bytes, SHA256 `5fe374fe9670d46a97b0177d1c3810c0bb3896d15bf552134fcc5f215a7fa109`; archive and installed directory contain M2M catalog/notice but no GGUF catalog, Hy NOTICE, llama runtime or GGUF/LiModel weight | Passed |
++
++The machine-readable installed-Host benchmark is
++`F:\documents.i-wish-research\language-input-m2m100-418m-20260830\benchmarks\m2m100-installed-host-20260831.json`.
++The research artifacts, source conversion manifest and pack input remain under
++the same research child; model weights are not stored in the repository.
++
++## Retired Hy-MT2 GGUF evidence (2026-08-30, Asia/Shanghai)
++
++This section is retained as an audit trail only. Hy-MT2 was removed from the
++active product, catalog, installer, Host runtime and user model directory on
++2026-08-31 after real input-method testing showed multi-minute cold and long
++candidate-refresh latency. The research copy, package provenance and retired
++installed files remain under
++`F:\documents.i-wish-research\language-input-hy-mt2-20260830`; no active
++release claim below authorizes reinstalling it.
++
++The optional Tencent backend is distributed as an independent Apache-2.0
++component. The GGUF itself is not bundled into the installer; users import the
++audited `.limodel` component, and a selected-but-missing component is an
++explicit error rather than a QuickMT fallback.
++
++| Requirement | Fresh evidence | Status |
++| --- | --- | --- |
++| Fixed model provenance and independent package | HF revision `9df5c824a00a744fb0512a29c640466f4d97dfb0`, model size `461,860,800` bytes, model SHA256 `cc497fe8f033b52b3b8b00a7669e9661435432f9d4cd43f7ed24400c01507a93`, pack size `461,874,574` bytes, pack SHA256 `3d2c9146ecb7c9d9f3570de4464660b6016d363724ea63b3d61d86155e2f531d`, Apache-2.0 license and NOTICE; pack audit/install unit tests | Passed |
++| STQ1_0 runtime compatibility | Patched `llama.cpp` revision `1e411d8f5a1e23525fa3265dfb4bd76265465397`; metadata-gated legacy serialized type-42 mapping for the official Hunyuan 2bit-stride16 file; exact model load and real translation smoke | Passed |
++| QuickMT default and model switch | `tests/test_rime_gloss.ps1`: x64 48/48 and Win32 48/48, including `ModelSelection`, saved options and independent display/speech controls | Passed |
++| Loopback/auth/lifecycle/no external network | Packaged Host benchmark used a random loopback port and bearer token; runtime child is Host-owned, proxy variables/API key are stripped, and benchmark network mode is loopback-only | Passed |
++| Missing model behavior | Packaged Host returned HTTP 409 `missing-model-component` with no fallback when the Hy component directory was absent | Passed |
++| Sensitive controls | x64/Win32 Rime matrices passed `SensitiveSuppression`; sensitive sources are filtered before cache, Host and llama-server request paths, candidate display and speech | Passed |
++| Existing 120-entry blind set | 360 submitted translations (120 each for en/ja/es), 333 legal outputs (92.5% overall): en 111/120 (92.5%), ja 120/120 (100%), es 102/120 (85%). Three batches returned empty numbered lines and were correctly rejected as HTTP 502; this is recorded model-format/coverage behavior, not counted as legal output or silently substituted | Measured |
++| Latency and memory | Overall batch latency p50 69,868 ms, p95 105,096 ms, max 118,759 ms; peak Host 33,816,576 bytes, llama-server 1,132,978,176 bytes, total 1,174,675,456 bytes | Measured |
++| Safety fixture | 76/76: 40/40 unsafe suppressed (recall 1.0), 36/36 safe allowed (specificity 1.0) | Passed |
++
++The machine-readable benchmark evidence is
++`F:\documents.i-wish-research\language-input-hy-mt2-20260830\hy-mt2-benchmark-v1.json`.
++That full run used the immediately prior source-equivalent Host build with SHA256
++`c1f449797138fe51e83833c8b83165d6eb10db97626445f31704f1213f488537`; the
++final staged PyInstaller rebuild has the same recorded source/runtime inputs,
++passed a fresh real-translation/missing-model smoke, and has SHA256
++`dac1e9d8148c5211bd7b51417a499da772ab4dbd3928d4bf87b050cd4879ee79`.
++The invalid batches contained replacement-character/ambiguous corpus entries;
++the direct raw-response reproduction returned numbered blank lines. The Host
++therefore rejected the result, preserving the exact-output contract.
++
++Final staging and packaging evidence: `stage_language_input.ps1` completed with
++197,860 GlossPack entries, page size 9 and zero user databases;
++`stage_model_host.ps1` produced 121 files and 136,805,919 bytes with final Host
++SHA256 `dac1e9d8148c5211bd7b51417a499da772ab4dbd3928d4bf87b050cd4879ee79`.
++NSIS exited 0 and produced
++`output/archives/weasel-0.1.0-test-installer.exe` (44,569,812 bytes,
++SHA256 `6DBEEB98DD3FAB77C7245D304384E8F4F9E6C3BC71159A2E40EA776E15DE41BF`).
++A fresh 7-Zip extraction contained 260 regular files, the GGUF catalog, Hy
++NOTICE, Host and llama-server, zero `.gguf`/`.limodel` files and zero user
++databases. The installed x64 `WeaselServer.exe` is 2,833,920 bytes with SHA256
++`0201692F62AB72CCD5BCB1F5DA0D3064EAED4980F0595AED293E686C29415C9A`;
++installed Host, catalog and NOTICE hashes were also checked against the staged
++artifacts.
++
++After installing that exact archive, a fresh Notepad window selected AI,
++Hy-MT2-1.8B and English, then entered `q`. The candidate list refreshed to
++`[en·AI]` rows such as `器 / instrument` and `去 / go`; the model-cache v3
++contained both the QuickMT and Hy-MT2 keys. The installed direct Host smoke
++returned HTTP 200, advertised `en,es,ja` and translated `量子纠缠` to
++`Quantum entanglement` in 30.8 seconds. Its random loopback port, bearer
++authentication and graceful idle cleanup were observed; no Host or
++llama-server child remained after cleanup.
++
++## Local transport retry hotfix evidence (2026-08-30, Asia/Shanghai)
++
++The interactive local path no longer retries a failed Host/llama request 100
++times. A local transport error now completes the worker once, refreshes the UI
++with `本地 AI 翻译请求失败`, and uses the existing per-word cooldown before a
++later input may retry. This prevents a slow or failed Hy-MT2 batch from keeping
++the worker apparently hung for hours; QuickMT routing and the separate model
++cache remain unchanged.
++
++- The new regression fixture forced a local `kTransport` failure through the
++  Host-owned process path and verified one request, one completion callback and
++  `WaitUntilIdleForTesting(2s)` on both x64 and Win32. Native output was
++  `LanguageInputRemoteTests: all checks passed` for both architectures.
++- Fresh Python tests ran `46/46`, the Rime option matrix ran `48/48` for each
++  x64 and Win32, and `weasel.sln` Release builds completed with zero errors for
++  both architectures.
++- The retry-fix installer is
++  `output/archives/weasel-0.1.0-retryfix-20260830-installer.exe`,
++  `44,564,357` bytes, SHA256
++  `2665163703e60a942ae4ad0948f8d2c4b725d8e24b392d1ee9f914427a5b1c86`.
++  Its archive listing contains the GGUF catalog, Hy NOTICE, Host and
++  `llama-server.exe`; the imported user GGUF remains outside the installer.
++- The installed registry version is `0.1.0.1`; installed x64
++  `WeaselServer.exe` matches the rebuilt binary byte-for-byte
++  (`10b749e4e7c153757d564ff184249ce9510b0d59fcab6aba4d853bd94b5a9736`).
++  The installed C++ WinHTTP smoke used the installed Host and user-imported
++  Hy-MT2 model, returned the exact UTF-8 result `你好` → `Hello`, and completed
++  in about 32.3 seconds. Peak total working set was `834,101,248` bytes; the
++  Host and llama-server children were absent after cleanup.
+ 
+ ## Final 0.17.4.3 installation evidence (2026-08-29, Asia/Shanghai)
+ 
+diff --git a/language-input/licenses/M2M100-MIT-LICENSE.txt b/language-input/licenses/M2M100-MIT-LICENSE.txt
+new file mode 100644
+index 0000000..b96dcb0
+--- /dev/null
++++ b/language-input/licenses/M2M100-MIT-LICENSE.txt
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) Facebook, Inc. and its affiliates.
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/language-input/licenses/M2M100-NOTICE.txt b/language-input/licenses/M2M100-NOTICE.txt
+new file mode 100644
+index 0000000..af30387
+--- /dev/null
++++ b/language-input/licenses/M2M100-NOTICE.txt
+@@ -0,0 +1,10 @@
++M2M100 418M model attribution
++
++Upstream model: facebook/m2m100_418M
++Pinned upstream revision: 55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636
++License: MIT
++
++This Language Input component uses the official M2M100 418M checkpoint,
++converted to CTranslate2 INT8 for offline CPU inference. The source checkpoint
++artifact recorded for provenance is pytorch_model.bin, 1935796948 bytes,
++SHA256 d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1.
+diff --git a/language-input/model-research/CANDIDATES.md b/language-input/model-research/CANDIDATES.md
+index 0638964..02fd5d1 100644
+--- a/language-input/model-research/CANDIDATES.md
++++ b/language-input/model-research/CANDIDATES.md
+@@ -1,9 +1,12 @@
+ # Language Input local-model candidates
+ 
+-Research dates: 2026-08-26 through 2026-08-29
+-Status: QuickMT three-language route selected for a practical input-method preview
+-Approved research directory:
+-`F:\documents\.i-wish-research\language-input-ai-models-20260826`
++Research dates: 2026-08-26 through 2026-08-31
++Status: QuickMT remains the default; M2M100 418M INT8 is an optional
++experimental input-method backend; Hy-MT2 is retired
++Approved research directories:
++- Historical candidate screening: `F:\documents\.i-wish-research\language-input-ai-models-20260826`
++- M2M100 integration: `F:\documents.i-wish-research\language-input-m2m100-418m-20260830`
++- Retired Hy-MT2 integration: `F:\documents.i-wish-research\language-input-hy-mt2-20260830`
+ 
+ ## Research boundary
+ 
+@@ -24,19 +27,18 @@ the initial transfer estimate 6,484,643,520 bytes (6.039 GiB). The immutable
+ download inventory is also recorded in the workflow-owned
+ `provenance/research-gate-v1.json` before any weight is downloaded.
+ 
+-The user explicitly raised the transfer cap to 30 GiB on 2026-08-27. Current
+-conservative accounting after all three QuickMT components is 23,676,384,782
+-network bytes and 24,222,601,740 bytes of research-child occupancy. The ledger includes
+-the pinned 4,958,230,644-byte weight, 12,206 bytes of fixed-revision manifest,
+-configuration and model-card data, the offline INT8 conversion, two full local
+-benchmark passes and the blind-review artifacts. No additional candidate is
+-the verified QuickMT English, Japanese and Spanish files. The network and
++The user explicitly raised the transfer cap to 30 GiB on 2026-08-27. The
++historical accounting below covers the original QuickMT/shortlist screening.
++The later M2M100 integration used the separate approved child
++`F:\documents.i-wish-research\language-input-m2m100-418m-20260830`; its source,
++conversion, pack and benchmark manifests are retained there. The network and
+ occupancy caps remain unexceeded.
+ 
+ ## Runtime decision
+ 
+-Status: **CTranslate2 4.8.1 QuickMT route selected for practical preview
+-integration under the revised 2026-08-29 acceptance contract**.
++Status: **CTranslate2 4.8.1 QuickMT route remains the default; M2M100 418M
++INT8 is an optional experimental backend under the 2026-08-31 acceptance
++contract**.
+ 
+ The product runtime is the CTranslate2-based `LanguageInputModelHost.exe`
+ described in [`../MODEL.zh-CN.md`](../MODEL.zh-CN.md). It loads the three
+@@ -259,6 +261,28 @@ working set of 970,801,152 bytes. The adjudicated 180-item blind review
+ 91.1% agreement, Cohen's kappa about 0.802) rejected it at 76.7% English,
+ 80.0% Japanese and 73.3% Spanish.
+ 
++#### Product integration trial (2026-08-31)
++
++The user nevertheless requested a practical input-method trial. The converted
++runtime was packaged independently as `m2m100-418m-int8.limodel`
++(`499,727,982` bytes, SHA256
++`238b1ed0859704b9d220bd40b7a1cabb234454b408f538930b2b6669f1e5a525`) with
++MIT license and NOTICE files. It is now an optional product backend behind
++`AI 模型：M2M100 418M`; QuickMT remains the default and the two pack/catalog
++formats are not interchangeable.
++
++The product Host benchmark used the existing 120-entry set and the installed
++x64 PyInstaller Host (`4,892,238` bytes, SHA256
++`84148537a96c5ae0444217aaa53205d513df1b21ddf90bb464c774a98d3001d8`). It
++produced 120/120 legal outputs for each of English, Japanese and Spanish, with
++ordinary eligible coverage 96/96 for each. Warm nine-candidate p95 was
++880.92/1,143.98/873.39 ms and peak working set was
++664,711,168/679,407,616/666,841,088 bytes. The safety fixture suppressed
++40/40 unsafe cases and allowed 36/36 safe cases. A missing component returned
++HTTP 409 `missing-model-component`; it did not fall back to QuickMT. Full
++machine-readable evidence is under
++`F:\documents.i-wish-research\language-input-m2m100-418m-20260830\benchmarks`.
++
+ ### OPUS and post-edit experiments
+ 
+ Permissively licensed OPUS direct/pivot routes were fast but failed semantics;
+@@ -377,6 +401,37 @@ now dropped individually, Japanese beams prefer target-script output, and up
+ to two distinct concise glosses are shown. Compact evidence is in
+ `model-research/quickmt-practical-v2.json`.
+ 
++### 2026-08-30 optional Hy-MT2 backend addendum — retired
++
++This addendum is historical. Hy-MT2 was removed from the active product and
++user model directory on 2026-08-31 after real input-method testing showed
++multi-minute cold and long candidate-refresh latency. The research and
++retired installed copy remain under
++`F:\documents.i-wish-research\language-input-hy-mt2-20260830`; it is not a
++current candidate or release dependency.
++
++Tencent `Hy-MT2-1.8B-1.25Bit-GGUF` was integrated as an optional backend after
++the user confirmed the architecture plan. It is not a replacement for the
++QuickMT default. The downloaded research copy and provenance report are kept
++under `F:\documents.i-wish-research\language-input-hy-mt2-20260830`; the
++project does not store the 461,860,800-byte model weight.
++
++The exact Hugging Face revision is
++`9df5c824a00a744fb0512a29c640466f4d97dfb0`, with model SHA256
++`cc497fe8f033b52b3b8b00a7669e9661435432f9d4cd43f7ed24400c01507a93`. The
++independent package is `hy-mt2-1-8b-1-25bit.limodel`, Apache-2.0, and has
++package SHA256
++`3d2c9146ecb7c9d9f3570de4464660b6016d363724ea63b3d61d86155e2f531d`.
++It uses a separate `gguf-packs-v1.json` catalog and does not share the
++QuickMT/CC-BY pack validator.
++
++The Host bundle owns `llama-server.exe` as a loopback-only, token-authenticated
++child process. Its llama.cpp revision is
++`1e411d8f5a1e23525fa3265dfb4bd76265465397`, with the metadata-gated legacy
++serialized type-42 to `STQ1_0` compatibility mapping needed by the official
++file. The 120-entry blind-set, safety, latency, memory and missing-model
++measurements are recorded in the research report when the final run completes.
++
+ ## Screened-out candidates
+ 
+ | Family | Decision | Evidence-based reason |
+diff --git a/language-input/model-research/m2m100-pack-input-v1.json b/language-input/model-research/m2m100-pack-input-v1.json
+new file mode 100644
+index 0000000..be43060
+--- /dev/null
++++ b/language-input/model-research/m2m100-pack-input-v1.json
+@@ -0,0 +1,15 @@
++{
++  "schema_version": 1,
++  "component_id": "m2m100-418m-int8",
++  "display_name": "M2M100 418M INT8",
++  "repository": "facebook/m2m100_418M",
++  "revision": "55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636",
++  "license": "MIT",
++  "provides": ["en", "ja", "es"],
++  "requires": [],
++  "source": {
++    "file_name": "pytorch_model.bin",
++    "size": 1935796948,
++    "sha256": "d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1"
++  }
++}
+diff --git a/language-input/models/m2m100-packs-v1.json b/language-input/models/m2m100-packs-v1.json
+new file mode 100644
+index 0000000..4e56001
+--- /dev/null
++++ b/language-input/models/m2m100-packs-v1.json
+@@ -0,0 +1,65 @@
++{
++  "schema_version": 1,
++  "format": "language-input-m2m100-model-pack-v1",
++  "route_id": "m2m100-418m-int8",
++  "runtime": {
++    "host": "LanguageInputModelHost",
++    "architecture": "x64",
++    "ctranslate2": "4.8.1",
++    "sentencepiece": "0.2.1"
++  },
++  "components": [
++    {
++      "id": "m2m100-418m-int8",
++      "display_name": "M2M100 418M INT8",
++      "file_name": "m2m100-418m-int8.limodel",
++      "file_size": 499727982,
++      "file_sha256": "238b1ed0859704b9d220bd40b7a1cabb234454b408f538930b2b6669f1e5a525",
++      "revision": "55c2e61bbf05dfb8d7abccdc3fae6fc8512fd636",
++      "repository": "facebook/m2m100_418M",
++      "provides": ["en", "ja", "es"],
++      "requires": [],
++      "license": "MIT",
++      "license_sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85",
++      "notice_sha256": "373aa76ce0f1fa6e7f0526dc7df8955d6e0b546a5452ad1d7dd4421d128e2bbf",
++      "runtime_bytes": 499724092,
++      "files": [
++        {
++          "path": "model/config.json",
++          "size": 233,
++          "sha256": "72901fbd8abd89fb5cf4a388f26fc681f5c4c58a1e1a88b30b879f107270e7ee"
++        },
++        {
++          "path": "model/model.bin",
++          "size": 490667752,
++          "sha256": "a1826980fc5c037e69c7ac94fcb56c03001a66f380eb71863cc0a3879e71421b"
++        },
++        {
++          "path": "model/sentencepiece.bpe.model",
++          "size": 2423393,
++          "sha256": "d8f7c76ed2a5e0822be39f0a4f95a55eb19c78f4593ce609e2edbc2aea4d380a"
++        },
++        {
++          "path": "model/shared_vocabulary.json",
++          "size": 2924622,
++          "sha256": "18916ac68f9ac8fbd5250ca603dcb3861aac8672924d93a8dadc82eb3147f941"
++        },
++        {
++          "path": "model/vocab.json",
++          "size": 3708092,
++          "sha256": "b6e77e474aeea8f441363aca7614317c06381f3eacfe10fb9856d5081d1074cc"
++        }
++      ],
++      "source": {
++        "file_name": "pytorch_model.bin",
++        "size": 1935796948,
++        "sha256": "d907ea45e4e4b9db163382a6674f6218b3c59566fe06d77f4055c208b4e87ed1"
++      }
++    }
++  ],
++  "routes": {
++    "en": ["m2m100-418m-int8"],
++    "ja": ["m2m100-418m-int8"],
++    "es": ["m2m100-418m-int8"]
++  }
++}
+diff --git a/language-input/rime/language_input_flypy.schema.yaml b/language-input/rime/language_input_flypy.schema.yaml
+index f53e944..28d7c0f 100644
+--- a/language-input/rime/language_input_flypy.schema.yaml
++++ b/language-input/rime/language_input_flypy.schema.yaml
+@@ -12,6 +12,9 @@ __patch:
+       - name: language_input_ai
+         reset: 0
+         states: [ 翻译来源：词典, 翻译来源：AI ]
++      - name: language_input_model_m2m100
++        reset: 0
++        states: [ AI 模型：QuickMT, AI 模型：M2M100 418M ]
+       - options:
+           - language_input_en
+           - language_input_ja
+diff --git a/language-input/rime/language_input_pinyin.schema.yaml b/language-input/rime/language_input_pinyin.schema.yaml
+index 087e393..70b60d7 100644
+--- a/language-input/rime/language_input_pinyin.schema.yaml
++++ b/language-input/rime/language_input_pinyin.schema.yaml
+@@ -12,6 +12,9 @@ __patch:
+       - name: language_input_ai
+         reset: 0
+         states: [ 翻译来源：词典, 翻译来源：AI ]
++      - name: language_input_model_m2m100
++        reset: 0
++        states: [ AI 模型：QuickMT, AI 模型：M2M100 418M ]
+       - options:
+           - language_input_en
+           - language_input_ja
+diff --git a/scripts/benchmark_m2m100_host.py b/scripts/benchmark_m2m100_host.py
+new file mode 100644
+index 0000000..4c625e3
+--- /dev/null
++++ b/scripts/benchmark_m2m100_host.py
+@@ -0,0 +1,594 @@
++#!/usr/bin/env python3
++"""Exercise the product M2M100 localhost host on the 120-item blind set."""
++
++from __future__ import annotations
++
++import argparse
++import ctypes
++import hashlib
++import json
++import math
++import os
++import queue
++import secrets
++import subprocess
++import sys
++import tempfile
++import threading
++import time
++import urllib.error
++import urllib.request
++from pathlib import Path
++from typing import Mapping, Sequence
++
++# Permit both `python -m scripts.benchmark_m2m100_host` and the more natural
++# `python scripts/benchmark_m2m100_host.py` invocation from the repository root.
++if __package__ in (None, ""):
++    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++
++from scripts.benchmark_local_model import ORDINARY_CATEGORIES, load_corpus
++from scripts.language_input_model_host import is_unsafe_source
++
++
++MODEL_ID = "m2m100-418m-int8"
++MAX_GLOSS_CHARACTERS = 40
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def nearest_percentile(values: Sequence[float], percentile: float) -> float | None:
++    if not values:
++        return None
++    rank = max(1, math.ceil(len(values) * percentile))
++    return sorted(values)[rank - 1]
++
++
++def is_legal_gloss(value: object) -> bool:
++    if not isinstance(value, str):
++        return False
++    value = value.strip()
++    return bool(value) and len(value) <= MAX_GLOSS_CHARACTERS and not any(
++        character in value
++        for character in "\r\n\t"
++    ) and not any(ord(character) < 32 for character in value)
++
++
++class WorkingSetSampler:
++    """Sample one Windows process without adding a third-party dependency."""
++
++    def __init__(self, pid: int) -> None:
++        self.pid = pid
++        self.peak_bytes = 0
++        self._stop = threading.Event()
++        self._thread: threading.Thread | None = None
++
++    def _sample(self) -> None:
++        if os.name != "nt":
++            return
++        try:
++            from ctypes import wintypes
++
++            class ProcessMemoryCounters(ctypes.Structure):
++                _fields_ = [
++                    ("cb", wintypes.DWORD),
++                    ("PageFaultCount", wintypes.DWORD),
++                    ("PeakWorkingSetSize", ctypes.c_size_t),
++                    ("WorkingSetSize", ctypes.c_size_t),
++                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
++                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
++                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
++                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
++                    ("PagefileUsage", ctypes.c_size_t),
++                    ("PeakPagefileUsage", ctypes.c_size_t),
++                ]
++
++            kernel32 = ctypes.windll.kernel32
++            psapi = ctypes.windll.psapi
++            handle = kernel32.OpenProcess(0x1000 | 0x0010, False, self.pid)
++            if not handle:
++                return
++            try:
++                counters = ProcessMemoryCounters()
++                counters.cb = ctypes.sizeof(counters)
++                if psapi.GetProcessMemoryInfo(
++                    handle,
++                    ctypes.byref(counters),
++                    counters.cb,
++                ):
++                    self.peak_bytes = max(
++                        self.peak_bytes,
++                        int(counters.PeakWorkingSetSize),
++                        int(counters.WorkingSetSize),
++                    )
++            finally:
++                kernel32.CloseHandle(handle)
++        except (AttributeError, OSError):
++            return
++
++    def _run(self) -> None:
++        while not self._stop.is_set():
++            self._sample()
++            self._stop.wait(0.05)
++        self._sample()
++
++    def start(self) -> None:
++        self._thread = threading.Thread(target=self._run, daemon=True)
++        self._thread.start()
++
++    def stop(self) -> int | None:
++        self._stop.set()
++        if self._thread is not None:
++            self._thread.join(timeout=2)
++        return self.peak_bytes or None
++
++
++class LocalHost:
++    def __init__(
++        self,
++        executable: Path,
++        quick_catalog: Path,
++        m2m100_catalog: Path,
++        model_root: Path,
++        *,
++        threads: int,
++    ) -> None:
++        token = secrets.token_urlsafe(48)
++        self.process = subprocess.Popen(
++            [
++                str(executable),
++                "--serve",
++                "--catalog",
++                str(quick_catalog),
++                "--m2m100-catalog",
++                str(m2m100_catalog),
++                "--models",
++                str(model_root),
++                "--port",
++                "0",
++                "--token",
++                token,
++                "--idle-seconds",
++                "900",
++                "--threads",
++                str(threads),
++            ],
++            cwd=str(executable.parent),
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
++            text=True,
++            encoding="utf-8",
++            errors="replace",
++        )
++        self.token = token
++        self._ready_queue: queue.Queue[str] = queue.Queue()
++        self._stdout_thread = threading.Thread(
++            target=self._read_stdout,
++            daemon=True,
++        )
++        self._stdout_thread.start()
++        self.memory = WorkingSetSampler(self.process.pid)
++        self.memory.start()
++        self.peak_working_set_bytes: int | None = None
++        try:
++            line = self._ready_queue.get(timeout=60).strip()
++        except queue.Empty as error:
++            self.close()
++            raise RuntimeError("local host did not become ready") from error
++        fields = line.split()
++        if len(fields) != 2 or fields[0] != "READY":
++            self.close()
++            raise RuntimeError("local host returned an invalid ready line")
++        try:
++            self.port = int(fields[1])
++        except ValueError as error:
++            self.close()
++            raise RuntimeError("local host returned an invalid port") from error
++
++    def _read_stdout(self) -> None:
++        if self.process.stdout is None:
++            return
++        for line in self.process.stdout:
++            self._ready_queue.put(line)
++
++    def post(
++        self,
++        language: str,
++        words: Sequence[str],
++    ) -> tuple[int, Mapping[str, object], float]:
++        payload = {
++            "model": "local",
++            "messages": [
++                {
++                    "role": "user",
++                    "content": json.dumps(
++                        {
++                            "target_language": language,
++                            "words": list(words),
++                            "model": MODEL_ID,
++                        },
++                        ensure_ascii=False,
++                        separators=(",", ":"),
++                    ),
++                }
++            ],
++        }
++        request = urllib.request.Request(
++            f"http://127.0.0.1:{self.port}/v1/chat/completions",
++            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
++            headers={
++                "Authorization": f"Bearer {self.token}",
++                "Content-Type": "application/json",
++            },
++            method="POST",
++        )
++        started = time.perf_counter()
++        try:
++            with urllib.request.urlopen(request, timeout=30) as response:
++                document = json.loads(response.read().decode("utf-8"))
++                status = int(response.status)
++        except urllib.error.HTTPError as error:
++            try:
++                document = json.loads(error.read().decode("utf-8"))
++            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
++                document = {}
++            status = int(error.code)
++        except (OSError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError):
++            document = {}
++            status = 0
++        elapsed_ms = (time.perf_counter() - started) * 1000
++        return status, document if isinstance(document, dict) else {}, elapsed_ms
++
++    @staticmethod
++    def _extract_content(document: Mapping[str, object]) -> dict[str, object] | None:
++        try:
++            choices = document["choices"]
++            first = choices[0]  # type: ignore[index]
++            message = first["message"]  # type: ignore[index]
++            content = message["content"]  # type: ignore[index]
++            result = json.loads(content)
++        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
++            return None
++        return result if isinstance(result, dict) else None
++
++    def translate_map(
++        self,
++        language: str,
++        words: Sequence[str],
++    ) -> tuple[int, dict[str, object] | None, float]:
++        status, document, elapsed_ms = self.post(language, words)
++        return status, self._extract_content(document) if status == 200 else None, elapsed_ms
++
++    def close(self) -> None:
++        peak = self.memory.stop()
++        self.peak_working_set_bytes = peak
++        if self.process.poll() is None:
++            self.process.terminate()
++            try:
++                self.process.wait(timeout=5)
++            except subprocess.TimeoutExpired:
++                self.process.kill()
++                self.process.wait(timeout=5)
++        if self.process.stdout is not None:
++            self.process.stdout.close()
++        if self.process.stderr is not None:
++            self.process.stderr.close()
++
++
++def check_batch(
++    entries: Sequence[Mapping[str, object]],
++    result: dict[str, object] | None,
++) -> tuple[int, int, int, int, str | None]:
++    """Return safe count, legal count, suppressed count, ordinary legal count, error."""
++    if result is None:
++        return 0, 0, 0, 0, "invalid-response"
++    requested = [str(row["text"]) for row in entries]
++    unsafe = {word for word in requested if is_unsafe_source(word)}
++    safe = set(requested) - unsafe
++    if any(not isinstance(key, str) or key not in set(requested) for key in result):
++        return len(safe), 0, 0, 0, "unexpected-output-key"
++    suppressed = sum(word not in result for word in unsafe)
++    if suppressed != len(unsafe):
++        return len(safe), 0, suppressed, 0, "unsafe-source-not-suppressed"
++    legal = 0
++    ordinary_legal = 0
++    ordinary = ORDINARY_CATEGORIES
++    for row in entries:
++        word = str(row["text"])
++        if word in safe and is_legal_gloss(result.get(word)):
++            legal += 1
++            if row["category"] in ordinary:
++                ordinary_legal += 1
++        elif word in safe:
++            return len(safe), legal, suppressed, ordinary_legal, "missing-or-illegal-output"
++    return len(safe), legal, suppressed, ordinary_legal, None
++
++
++def run_corpus(
++    host: LocalHost,
++    entries: Sequence[Mapping[str, object]],
++    language: str,
++    *,
++    batch_size: int,
++) -> dict[str, object]:
++    ordinary_count = sum(row["category"] in ORDINARY_CATEGORIES for row in entries)
++    safe_count = 0
++    legal_count = 0
++    suppressed_count = 0
++    ordinary_legal = 0
++    errors: dict[str, int] = {}
++    latencies: list[float] = []
++    warm_nine: list[float] = []
++    cold_ms: float | None = None
++    batches = 0
++    for batch_index in range(0, len(entries), batch_size):
++        batch = entries[batch_index : batch_index + batch_size]
++        status, result, elapsed_ms = host.translate_map(
++            language,
++            [str(row["text"]) for row in batch],
++        )
++        batches += 1
++        if cold_ms is None:
++            cold_ms = elapsed_ms
++        if status == 200:
++            latencies.append(elapsed_ms)
++            if len(batch) == 9 and batches > 1:
++                warm_nine.append(elapsed_ms)
++        else:
++            reason = f"http-{status}"
++            errors[reason] = errors.get(reason, 0) + 1
++            continue
++        safe, legal, suppressed, ordinary, error = check_batch(batch, result)
++        safe_count += safe
++        legal_count += legal
++        suppressed_count += suppressed
++        ordinary_legal += ordinary
++        if error is not None:
++            errors[error] = errors.get(error, 0) + 1
++    return {
++        "language": language,
++        "requested": len(entries),
++        "safe_submitted": safe_count,
++        "legal_outputs": legal_count,
++        "legal_output_rate": legal_count / safe_count if safe_count else 0.0,
++        "unsafe_suppressed": suppressed_count,
++        "ordinary_requested": ordinary_count,
++        "ordinary_legal_outputs": ordinary_legal,
++        "ordinary_coverage": ordinary_legal / ordinary_count if ordinary_count else 0.0,
++        "batches": batches,
++        "errors": errors,
++        "cold_request_ms": cold_ms,
++        "warm_nine_candidate_latency_ms": {
++            "samples": len(warm_nine),
++            "p50": nearest_percentile(warm_nine, 0.50),
++            "p95": nearest_percentile(warm_nine, 0.95),
++            "maximum": max(warm_nine) if warm_nine else None,
++        },
++        "all_successful_request_latency_ms": {
++            "samples": len(latencies),
++            "p50": nearest_percentile(latencies, 0.50),
++            "p95": nearest_percentile(latencies, 0.95),
++            "maximum": max(latencies) if latencies else None,
++        },
++        "peak_working_set_bytes": None,
++    }
++
++
++def load_security_fixture(path: Path) -> list[dict[str, object]]:
++    document = json.loads(path.read_text(encoding="utf-8"))
++    entries = document.get("entries") if isinstance(document, dict) else None
++    if not isinstance(entries, list) or not entries:
++        raise ValueError("security fixture has no entries")
++    checked: list[dict[str, object]] = []
++    for row in entries:
++        if (
++            not isinstance(row, dict)
++            or not isinstance(row.get("text"), str)
++            or row.get("expected") not in {"suppress", "translate"}
++        ):
++            raise ValueError("security fixture entry is invalid")
++        checked.append(row)
++    return checked
++
++
++def run_security(
++    host: LocalHost,
++    entries: Sequence[Mapping[str, object]],
++    *,
++    batch_size: int,
++) -> dict[str, object]:
++    expected_suppress = sum(row["expected"] == "suppress" for row in entries)
++    expected_allow = sum(row["expected"] == "translate" for row in entries)
++    actual_suppress = 0
++    allowed_legal = 0
++    errors: dict[str, int] = {}
++    for start in range(0, len(entries), batch_size):
++        batch = entries[start : start + batch_size]
++        status, result, _ = host.translate_map(
++            "en",
++            [str(row["text"]) for row in batch],
++        )
++        if status != 200 or result is None:
++            reason = f"http-{status}" if status != 200 else "invalid-response"
++            errors[reason] = errors.get(reason, 0) + len(batch)
++            continue
++        for row in batch:
++            word = str(row["text"])
++            present = word in result
++            legal = present and is_legal_gloss(result[word])
++            if row["expected"] == "suppress":
++                actual_suppress += not present
++                if present:
++                    errors["unsafe-output-present"] = errors.get("unsafe-output-present", 0) + 1
++            elif legal:
++                allowed_legal += 1
++            else:
++                errors["safe-output-missing-or-illegal"] = errors.get(
++                    "safe-output-missing-or-illegal", 0
++                ) + 1
++    return {
++        "requested": len(entries),
++        "expected_suppress": expected_suppress,
++        "suppressed": actual_suppress,
++        "suppression_recall": (
++            actual_suppress / expected_suppress if expected_suppress else 0.0
++        ),
++        "expected_allow": expected_allow,
++        "legal_allowed": allowed_legal,
++        "allow_rate": allowed_legal / expected_allow if expected_allow else 0.0,
++        "errors": errors,
++        "peak_working_set_bytes": None,
++    }
++
++
++def run_missing_model(
++    executable: Path,
++    quick_catalog: Path,
++    m2m100_catalog: Path,
++    *,
++    work_root: Path,
++    threads: int,
++) -> dict[str, object]:
++    with tempfile.TemporaryDirectory(prefix="m2m100-missing-", dir=work_root) as temporary:
++        model_root = Path(temporary)
++        host = LocalHost(
++            executable,
++            quick_catalog,
++            m2m100_catalog,
++            model_root,
++            threads=threads,
++        )
++        try:
++            status, document, _ = host.post("en", ["未导入模型"])
++        finally:
++            host.close()
++    error = document.get("error") if isinstance(document, dict) else None
++    return {
++        "http_status": status,
++        "error": error,
++        "passed": status == 409 and error == "missing-model-component",
++    }
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--host-executable", required=True, type=Path)
++    parser.add_argument("--quick-catalog", required=True, type=Path)
++    parser.add_argument("--m2m100-catalog", required=True, type=Path)
++    parser.add_argument("--models", required=True, type=Path)
++    parser.add_argument("--corpus", required=True, type=Path)
++    parser.add_argument("--security-fixture", required=True, type=Path)
++    parser.add_argument("--summary", required=True, type=Path)
++    parser.add_argument("--work-root", required=True, type=Path)
++    parser.add_argument("--threads", type=int, default=8)
++    parser.add_argument("--batch-size", type=int, default=9)
++    return parser.parse_args()
++
++
++def main() -> int:
++    args = parse_args()
++    if not 1 <= args.batch_size <= 9 or args.threads < 1:
++        raise ValueError("invalid batch size or thread count")
++    entries = load_corpus(args.corpus)
++    if len(entries) != 120:
++        raise ValueError(f"expected the existing 120-item blind set, got {len(entries)}")
++    security_entries = load_security_fixture(args.security_fixture)
++    for path in (
++        args.host_executable,
++        args.quick_catalog,
++        args.m2m100_catalog,
++        args.models,
++        args.corpus,
++        args.security_fixture,
++        args.work_root,
++    ):
++        if not path.exists():
++            raise FileNotFoundError(path)
++
++    languages: dict[str, dict[str, object]] = {}
++    for language in ("en", "ja", "es"):
++        host = LocalHost(
++            args.host_executable,
++            args.quick_catalog,
++            args.m2m100_catalog,
++            args.models,
++            threads=args.threads,
++        )
++        try:
++            result = run_corpus(
++                host,
++                entries,
++                language,
++                batch_size=args.batch_size,
++            )
++        finally:
++            host.close()
++        result["peak_working_set_bytes"] = host.peak_working_set_bytes
++        languages[language] = result
++
++    security_host = LocalHost(
++        args.host_executable,
++        args.quick_catalog,
++        args.m2m100_catalog,
++        args.models,
++        threads=args.threads,
++    )
++    try:
++        security = run_security(
++            security_host,
++            security_entries,
++            batch_size=args.batch_size,
++        )
++    finally:
++        security_host.close()
++    security["peak_working_set_bytes"] = security_host.peak_working_set_bytes
++
++    missing = run_missing_model(
++        args.host_executable,
++        args.quick_catalog,
++        args.m2m100_catalog,
++        work_root=args.work_root,
++        threads=args.threads,
++    )
++    host_stat = args.host_executable.stat()
++    summary = {
++        "schema_version": 1,
++        "model_id": MODEL_ID,
++        "host": {
++            "path": str(args.host_executable),
++            "size": host_stat.st_size,
++            "sha256": sha256_file(args.host_executable),
++        },
++        "corpus": {
++            "path": str(args.corpus),
++            "source_count": len(entries),
++            "sha256": sha256_file(args.corpus),
++        },
++        "settings": {
++            "batch_size": args.batch_size,
++            "threads": args.threads,
++            "target_languages": list(languages),
++        },
++        "languages": languages,
++        "security": security,
++        "missing_model": missing,
++    }
++    args.summary.parent.mkdir(parents=True, exist_ok=True)
++    temporary = args.summary.with_name(f".{args.summary.name}.{os.getpid()}.tmp")
++    temporary.write_text(
++        json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
++        encoding="utf-8",
++        newline="\n",
++    )
++    os.replace(temporary, args.summary)
++    print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
++    return 0 if missing["passed"] else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/build_m2m100_model_pack.py b/scripts/build_m2m100_model_pack.py
+new file mode 100644
+index 0000000..a255275
+--- /dev/null
++++ b/scripts/build_m2m100_model_pack.py
+@@ -0,0 +1,226 @@
++#!/usr/bin/env python3
++"""Build the independent MIT/CTranslate2 M2M100 Language Input pack."""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++import tempfile
++import zipfile
++from pathlib import Path, PurePosixPath
++from typing import Sequence
++
++
++PACK_FORMAT = "language-input-m2m100-model-pack-v1"
++FIXED_ZIP_TIME = (2026, 8, 31, 0, 0, 0)
++MAX_COMPONENT_BYTES = 2 * 1024 * 1024 * 1024
++RUNTIME_FILES = (
++    "config.json",
++    "model.bin",
++    "sentencepiece.bpe.model",
++    "shared_vocabulary.json",
++    "vocab.json",
++)
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def sha256_bytes(payload: bytes) -> str:
++    return hashlib.sha256(payload).hexdigest()
++
++
++def safe_relative_path(value: str) -> PurePosixPath:
++    path = PurePosixPath(value)
++    if (
++        not value
++        or path.is_absolute()
++        or "\\" in value
++        or any(part in {"", ".", ".."} for part in path.parts)
++    ):
++        raise ValueError(f"unsafe component path: {value!r}")
++    return path
++
++
++def real_file(path: Path, description: str) -> Path:
++    resolved = path.resolve(strict=True)
++    if not resolved.is_file() or path.is_symlink():
++        raise ValueError(f"{description} must be a real file")
++    return resolved
++
++
++def load_input(path: Path) -> dict[str, object]:
++    document = json.loads(path.read_text(encoding="utf-8"))
++    required = {
++        "schema_version",
++        "component_id",
++        "display_name",
++        "repository",
++        "revision",
++        "license",
++        "provides",
++        "requires",
++        "source",
++    }
++    if not isinstance(document, dict) or set(document) != required:
++        raise ValueError("M2M100 pack input has unexpected or missing keys")
++    source = document["source"]
++    if (
++        document["schema_version"] != 1
++        or not isinstance(document["component_id"], str)
++        or not document["component_id"]
++        or not isinstance(document["display_name"], str)
++        or not document["display_name"]
++        or document["repository"] != "facebook/m2m100_418M"
++        or not isinstance(document["revision"], str)
++        or len(document["revision"]) != 40
++        or any(char not in "0123456789abcdef" for char in document["revision"])
++        or document["license"] != "MIT"
++        or not isinstance(document["provides"], list)
++        or not document["provides"]
++        or any(not isinstance(value, str) for value in document["provides"])
++        or not isinstance(document["requires"], list)
++        or any(not isinstance(value, str) for value in document["requires"])
++        or not isinstance(source, dict)
++        or set(source) != {"file_name", "size", "sha256"}
++        or source["file_name"] != "pytorch_model.bin"
++        or not isinstance(source["size"], int)
++        or source["size"] <= 0
++        or source["size"] > MAX_COMPONENT_BYTES
++        or not isinstance(source["sha256"], str)
++        or len(source["sha256"]) != 64
++        or any(char not in "0123456789abcdef" for char in source["sha256"])
++    ):
++        raise ValueError("M2M100 pack input metadata is invalid")
++    return document
++
++
++def zip_info(name: str) -> zipfile.ZipInfo:
++    info = zipfile.ZipInfo(name, FIXED_ZIP_TIME)
++    info.compress_type = zipfile.ZIP_STORED
++    info.create_system = 0
++    info.external_attr = 0
++    return info
++
++
++def file_rows(model_root: Path) -> list[dict[str, object]]:
++    rows: list[dict[str, object]] = []
++    for name in RUNTIME_FILES:
++        path = real_file(model_root / name, f"M2M100 runtime file {name}")
++        size = path.stat().st_size
++        if size <= 0 or size > MAX_COMPONENT_BYTES:
++            raise ValueError(f"M2M100 runtime file has an invalid size: {name}")
++        rows.append(
++            {
++                "path": f"model/{name}",
++                "size": size,
++                "sha256": sha256_file(path),
++            }
++        )
++    return rows
++
++
++def build_pack(
++    *,
++    input_path: Path,
++    model_root: Path,
++    license_path: Path,
++    notice_path: Path,
++    output_path: Path,
++) -> dict[str, object]:
++    pack_input = load_input(input_path)
++    model_root = model_root.resolve(strict=True)
++    if not model_root.is_dir() or model_root.is_symlink():
++        raise ValueError("M2M100 model root must be a real directory")
++    license_file = real_file(license_path, "MIT license")
++    notice_file = real_file(notice_path, "NOTICE")
++    license_bytes = license_file.read_bytes()
++    notice_bytes = notice_file.read_bytes()
++    if not license_bytes or len(license_bytes) > 1024 * 1024:
++        raise ValueError("license file is empty or too large")
++    if not notice_bytes or len(notice_bytes) > 1024 * 1024:
++        raise ValueError("NOTICE file is empty or too large")
++    rows = file_rows(model_root)
++    manifest = {
++        "format": PACK_FORMAT,
++        "component_id": pack_input["component_id"],
++        "repository": pack_input["repository"],
++        "revision": pack_input["revision"],
++        "license": pack_input["license"],
++        "license_sha256": sha256_bytes(license_bytes),
++        "notice_sha256": sha256_bytes(notice_bytes),
++        "provides": pack_input["provides"],
++        "requires": pack_input["requires"],
++        "runtime_bytes": sum(int(row["size"]) for row in rows),
++        "files": rows,
++        "source": pack_input["source"],
++    }
++    manifest_bytes = (
++        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
++    ).encode("utf-8")
++    output = output_path.resolve()
++    if output.suffix.casefold() != ".limodel":
++        raise ValueError("output must use the .limodel extension")
++    output.parent.mkdir(parents=True, exist_ok=True)
++    handle, temporary_name = tempfile.mkstemp(
++        prefix=f".{output.name}.", suffix=".tmp", dir=output.parent
++    )
++    os.close(handle)
++    temporary = Path(temporary_name)
++    try:
++        with zipfile.ZipFile(temporary, "w", allowZip64=True) as archive:
++            archive.writestr(zip_info("manifest.json"), manifest_bytes)
++            archive.writestr(zip_info("NOTICE.txt"), notice_bytes)
++            archive.writestr(zip_info("LICENSE.txt"), license_bytes)
++            for row in rows:
++                name = str(row["path"]).split("/", 1)[1]
++                info = zip_info(str(row["path"]))
++                with (model_root / name).open("rb") as source, archive.open(
++                    info, "w"
++                ) as destination:
++                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
++                        destination.write(chunk)
++        os.replace(temporary, output)
++    finally:
++        temporary.unlink(missing_ok=True)
++    return {
++        "component_id": pack_input["component_id"],
++        "output": str(output),
++        "bytes": output.stat().st_size,
++        "sha256": sha256_file(output),
++        "manifest": manifest,
++    }
++
++
++def parse_args(argv: Sequence[str]) -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--input", required=True, type=Path)
++    parser.add_argument("--model-root", required=True, type=Path)
++    parser.add_argument("--license", required=True, type=Path)
++    parser.add_argument("--notice", required=True, type=Path)
++    parser.add_argument("--output", required=True, type=Path)
++    return parser.parse_args(argv)
++
++
++def main(argv: Sequence[str] | None = None) -> int:
++    args = parse_args(argv if argv is not None else os.sys.argv[1:])
++    result = build_pack(
++        input_path=args.input,
++        model_root=args.model_root,
++        license_path=args.license,
++        notice_path=args.notice,
++        output_path=args.output,
++    )
++    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/build_model_host.ps1 b/scripts/build_model_host.ps1
+index 767f835..38f77d6 100644
+--- a/scripts/build_model_host.ps1
++++ b/scripts/build_model_host.ps1
+@@ -4,15 +4,26 @@ param(
+   [string]$PythonExecutable,
+   [Parameter(Mandatory = $true)]
+   [string]$BuildRoot,
+-  [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
++  [string]$RepositoryRoot
+ )
+ 
+ $ErrorActionPreference = 'Stop'
++$utf8NoBom = [Text.UTF8Encoding]::new($false)
++if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
++  $RepositoryRoot = Split-Path -Parent $PSScriptRoot
++}
+ $root = [IO.Path]::GetFullPath($RepositoryRoot)
+ $python = [IO.Path]::GetFullPath($PythonExecutable)
+ $buildRoot = [IO.Path]::GetFullPath($BuildRoot)
+ $source = [IO.Path]::GetFullPath((Join-Path $root 'scripts\language_input_model_host.py'))
+ 
++function Get-RelativePathText {
++  param([string]$BasePath, [string]$TargetPath)
++  $baseUri = [Uri]::new(([IO.Path]::GetFullPath($BasePath).TrimEnd('\') + '\'))
++  $targetUri = [Uri]::new([IO.Path]::GetFullPath($TargetPath))
++  return [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
++}
++
+ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+   throw "Python executable does not exist: $python"
+ }
+@@ -89,14 +100,15 @@ if (-not (Test-Path -LiteralPath $hostExe -PathType Leaf) -or
+ $files = @(Get-ChildItem -LiteralPath $bundle -Recurse -File -Force)
+ $manifest = [ordered]@{
+   format = 'language-input-model-host-build-v1'
+-  source = [IO.Path]::GetRelativePath($root, $source).Replace('\', '/')
++  source = (Get-RelativePathText $root $source).Replace('\', '/')
+   source_sha256 = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+   environment = $expected
+   bundle_bytes = ($files | Measure-Object Length -Sum).Sum
+   executable_sha256 = (Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash.ToLowerInvariant()
+ }
+ $manifestPath = Join-Path $buildRoot 'build-manifest.json'
+-$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
++$manifestText = $manifest | ConvertTo-Json -Depth 5
++[IO.File]::WriteAllText($manifestPath, $manifestText + [Environment]::NewLine, $utf8NoBom)
+ 
+ [pscustomobject]@{
+   Bundle = $bundle
+diff --git a/scripts/language_input_model_host.py b/scripts/language_input_model_host.py
+index dccad27..7757607 100644
+--- a/scripts/language_input_model_host.py
++++ b/scripts/language_input_model_host.py
+@@ -17,18 +17,24 @@ import uuid
+ import zipfile
+ from http.server import BaseHTTPRequestHandler, HTTPServer
+ from pathlib import Path, PurePosixPath
+-from typing import Mapping, Sequence
++from typing import Sequence
+ 
+ 
+ CATALOG_SCHEMA_VERSION = 2
+ PACK_FORMAT = "language-input-model-pack-v1"
++M2M100_CATALOG_SCHEMA_VERSION = 1
++M2M100_PACK_FORMAT = "language-input-m2m100-model-pack-v1"
++QUICKMT_MODEL_ID = "quickmt-gloss-route-v2"
++M2M100_MODEL_ID = "m2m100-418m-int8"
+ INSTALL_FORMAT = "language-input-installed-component-v1"
++M2M100_INSTALL_FORMAT = "language-input-installed-m2m100-component-v1"
+ MAX_COMPONENT_BYTES = 2 * 1024 * 1024 * 1024
+ MAX_REQUEST_BYTES = 64 * 1024
+ MAX_WORD_BYTES = 128
+ MAX_WORDS = 9
+ MAX_GLOSS_CHARACTERS = 40
+ SUPPORTED_LANGUAGES = {"en", "ja", "es"}
++SUPPORTED_MODELS = {QUICKMT_MODEL_ID, M2M100_MODEL_ID}
+ COMPONENT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
+ 
+ 
+@@ -122,6 +128,151 @@ def load_pack_catalog(path: Path) -> dict[str, object]:
+     return document
+ 
+ 
++def load_m2m100_pack_catalog(path: Path) -> dict[str, object]:
++    """Load the independent MIT/CTranslate2 M2M100 catalog."""
++    document = json.loads(path.read_text(encoding="utf-8"))
++    required = {"schema_version", "format", "route_id", "runtime", "components", "routes"}
++    if not isinstance(document, dict) or set(document) != required:
++        raise ValueError("M2M100 catalog has unexpected or missing keys")
++    if document["schema_version"] != M2M100_CATALOG_SCHEMA_VERSION:
++        raise ValueError("unsupported M2M100 catalog schema")
++    if document["format"] != M2M100_PACK_FORMAT:
++        raise ValueError("unsupported M2M100 model-pack format")
++
++    runtime = document["runtime"]
++    runtime_keys = {"host", "architecture", "ctranslate2", "sentencepiece"}
++    if (
++        not isinstance(runtime, dict)
++        or set(runtime) != runtime_keys
++        or runtime["host"] != "LanguageInputModelHost"
++        or runtime["architecture"] != "x64"
++        or runtime["ctranslate2"] != "4.8.1"
++        or runtime["sentencepiece"] != "0.2.1"
++    ):
++        raise ValueError("M2M100 catalog runtime metadata is invalid")
++
++    components = document["components"]
++    routes = document["routes"]
++    if not isinstance(components, list) or not components or not isinstance(routes, dict):
++        raise ValueError("M2M100 catalog has invalid components or routes")
++    checked: dict[str, dict[str, object]] = {}
++    component_keys = {
++        "id",
++        "display_name",
++        "file_name",
++        "file_size",
++        "file_sha256",
++        "revision",
++        "repository",
++        "provides",
++        "requires",
++        "license",
++        "license_sha256",
++        "notice_sha256",
++        "runtime_bytes",
++        "files",
++        "source",
++    }
++    for component in components:
++        if not isinstance(component, dict) or set(component) != component_keys:
++            raise ValueError("M2M100 catalog component has unexpected or missing keys")
++        component_id = component["id"]
++        if not isinstance(component_id, str) or not COMPONENT_ID.fullmatch(component_id):
++            raise ValueError("M2M100 catalog component id is invalid")
++        if component_id in checked:
++            raise ValueError("M2M100 catalog contains duplicate component ids")
++        if (
++            not isinstance(component["display_name"], str)
++            or not component["display_name"]
++            or not isinstance(component["file_name"], str)
++            or not component["file_name"].endswith(".limodel")
++            or not isinstance(component["file_size"], int)
++            or component["file_size"] <= 0
++            or component["file_size"] > MAX_COMPONENT_BYTES
++            or not _is_sha256(component["file_sha256"])
++            or not isinstance(component["revision"], str)
++            or not re.fullmatch(r"[0-9a-f]{40}", component["revision"])
++            or not isinstance(component["repository"], str)
++            or component["repository"] != "facebook/m2m100_418M"
++            or component["license"] != "MIT"
++            or not _is_sha256(component["license_sha256"])
++            or not _is_sha256(component["notice_sha256"])
++            or not isinstance(component["runtime_bytes"], int)
++            or component["runtime_bytes"] <= 0
++            or component["runtime_bytes"] > MAX_COMPONENT_BYTES
++        ):
++            raise ValueError("M2M100 catalog component integrity metadata is invalid")
++        try:
++            file_name = _safe_relative_path(component["file_name"])
++        except ValueError as error:
++            raise ValueError("M2M100 catalog component path is invalid") from error
++        if len(file_name.parts) != 1 or not component["file_name"].endswith(".limodel"):
++            raise ValueError("M2M100 catalog component path is invalid")
++        source = component["source"]
++        if (
++            not isinstance(source, dict)
++            or set(source) != {"file_name", "size", "sha256"}
++            or source["file_name"] != "pytorch_model.bin"
++            or not isinstance(source["size"], int)
++            or source["size"] <= 0
++            or source["size"] > MAX_COMPONENT_BYTES
++            or not _is_sha256(source["sha256"])
++        ):
++            raise ValueError("M2M100 source metadata is invalid")
++        files = component["files"]
++        if not isinstance(files, list) or not files:
++            raise ValueError("M2M100 catalog component has no runtime files")
++        file_names: set[str] = set()
++        runtime_total = 0
++        for row in files:
++            if not isinstance(row, dict) or set(row) != {"path", "size", "sha256"}:
++                raise ValueError("M2M100 catalog runtime file metadata is invalid")
++            try:
++                relative = _safe_relative_path(row["path"])
++            except ValueError as error:
++                raise ValueError("M2M100 catalog runtime file path is invalid") from error
++            if relative.parts[0] != "model" or row["path"] in file_names:
++                raise ValueError("M2M100 catalog runtime file path is invalid")
++            if (
++                not isinstance(row["size"], int)
++                or row["size"] <= 0
++                or row["size"] > MAX_COMPONENT_BYTES
++                or not _is_sha256(row["sha256"])
++            ):
++                raise ValueError("M2M100 catalog runtime file metadata is invalid")
++            file_names.add(row["path"])
++            runtime_total += row["size"]
++        if runtime_total != component["runtime_bytes"]:
++            raise ValueError("M2M100 catalog runtime byte total is invalid")
++        provides = component["provides"]
++        requires = component["requires"]
++        if (
++            not isinstance(provides, list)
++            or not provides
++            or len(provides) != len(set(provides))
++            or any(language not in SUPPORTED_LANGUAGES for language in provides)
++            or not isinstance(requires, list)
++            or any(not isinstance(value, str) for value in requires)
++        ):
++            raise ValueError("M2M100 catalog component languages or dependencies are invalid")
++        checked[component_id] = component
++    for component in components:
++        if any(required_id not in checked for required_id in component["requires"]):
++            raise ValueError("M2M100 catalog component has an unknown dependency")
++    if set(routes) != SUPPORTED_LANGUAGES:
++        raise ValueError("M2M100 catalog routes must exactly define en, ja and es")
++    for language, component_ids in routes.items():
++        if (
++            not isinstance(component_ids, list)
++            or len(component_ids) != 1
++            or component_ids[0] not in checked
++            or language not in checked[component_ids[0]]["provides"]
++        ):
++            raise ValueError("M2M100 catalog route is invalid")
++    document["components_by_id"] = checked
++    return document
++
++
+ def _read_small_archive_json(archive: zipfile.ZipFile, name: str) -> dict[str, object]:
+     info = archive.getinfo(name)
+     if info.file_size <= 0 or info.file_size > 1024 * 1024:
+@@ -235,6 +386,104 @@ def audit_pack(
+     }
+ 
+ 
++def audit_m2m100_pack(
++    pack_path: Path,
++    catalog_path: Path,
++    *,
++    verify_payloads: bool = True,
++) -> dict[str, object]:
++    """Audit the independent M2M100/ MIT model package format."""
++    pack_path = pack_path.resolve(strict=True)
++    if not pack_path.is_file() or pack_path.is_symlink():
++        raise ValueError("M2M100 model pack must be a real file")
++    catalog = load_m2m100_pack_catalog(catalog_path)
++    pack_size = pack_path.stat().st_size
++    pack_hash = sha256_file(pack_path)
++    matches = [
++        component
++        for component in catalog["components"]
++        if component["file_size"] == pack_size and component["file_sha256"] == pack_hash
++    ]
++    if len(matches) != 1:
++        raise ValueError("M2M100 model pack is not an exact artifact from the installed catalog")
++    catalog_component = matches[0]
++
++    with zipfile.ZipFile(pack_path, "r") as archive:
++        entries = archive.infolist()
++        names = [entry.filename for entry in entries]
++        if len(names) != len(set(names)):
++            raise ValueError("M2M100 model pack contains duplicate entries")
++        if any(entry.compress_type != zipfile.ZIP_STORED for entry in entries):
++            raise ValueError("M2M100 model pack contains compressed entries")
++        required_names = {"manifest.json", "NOTICE.txt", "LICENSE.txt"}
++        if not required_names.issubset(names):
++            raise ValueError("M2M100 model pack is missing its manifest, license, or notice")
++        for name in names:
++            _safe_relative_path(name)
++        manifest = _read_small_archive_json(archive, "manifest.json")
++        manifest_keys = {
++            "format",
++            "component_id",
++            "repository",
++            "revision",
++            "license",
++            "license_sha256",
++            "provides",
++            "requires",
++            "runtime_bytes",
++            "notice_sha256",
++            "files",
++            "source",
++        }
++        if not isinstance(manifest, dict) or set(manifest) != manifest_keys:
++            raise ValueError("M2M100 model pack manifest has unexpected or missing keys")
++        if (
++            manifest["format"] != M2M100_PACK_FORMAT
++            or manifest["component_id"] != catalog_component["id"]
++            or manifest["repository"] != catalog_component["repository"]
++            or manifest["revision"] != catalog_component["revision"]
++            or manifest["license"] != catalog_component["license"]
++            or manifest["license_sha256"] != catalog_component["license_sha256"]
++            or manifest["notice_sha256"] != catalog_component["notice_sha256"]
++            or manifest["provides"] != catalog_component["provides"]
++            or manifest["requires"] != catalog_component["requires"]
++            or manifest["source"] != catalog_component["source"]
++        ):
++            raise ValueError("M2M100 model pack manifest disagrees with the catalog")
++        files = manifest["files"]
++        if not isinstance(files, list) or files != catalog_component["files"]:
++            raise ValueError("M2M100 model pack runtime files disagree with the catalog")
++        if not isinstance(manifest["runtime_bytes"], int) or manifest["runtime_bytes"] != catalog_component["runtime_bytes"]:
++            raise ValueError("M2M100 model pack runtime byte total is invalid")
++        expected_names = required_names | {row["path"] for row in files}
++        if set(names) != expected_names:
++            raise ValueError("M2M100 model pack entries do not exactly match its manifest")
++        notice = archive.read("NOTICE.txt")
++        if not notice or hashlib.sha256(notice).hexdigest() != catalog_component["notice_sha256"]:
++            raise ValueError("M2M100 model pack notice hash mismatch")
++        license_bytes = archive.read("LICENSE.txt")
++        if not license_bytes or hashlib.sha256(license_bytes).hexdigest() != catalog_component["license_sha256"]:
++            raise ValueError("M2M100 model pack license hash mismatch")
++        if verify_payloads:
++            for row in files:
++                entry = archive.getinfo(row["path"])
++                if entry.file_size != row["size"]:
++                    raise ValueError("M2M100 model file size mismatch")
++                digest = hashlib.sha256()
++                with archive.open(entry, "r") as stream:
++                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++                        digest.update(chunk)
++                if digest.hexdigest() != row["sha256"]:
++                    raise ValueError("M2M100 model file SHA256 mismatch")
++    return {
++        "component": catalog_component,
++        "manifest": manifest,
++        "pack_path": str(pack_path),
++        "pack_size": pack_size,
++        "pack_sha256": pack_hash,
++    }
++
++
+ def _real_model_root(model_root: Path) -> Path:
+     model_root.mkdir(parents=True, exist_ok=True)
+     root = model_root.resolve(strict=True)
+@@ -348,6 +597,125 @@ def install_pack(
+             shutil.rmtree(staging)
+ 
+ 
++def load_installed_m2m100_component(component_root: Path) -> dict[str, object]:
++    component_root = component_root.resolve(strict=True)
++    if not component_root.is_dir() or component_root.is_symlink():
++        raise ValueError("installed M2M100 component root is invalid")
++    record_path = component_root / "installed.json"
++    record = json.loads(record_path.read_text(encoding="utf-8"))
++    required = {"format", "component_id", "pack_size", "pack_sha256", "manifest"}
++    if not isinstance(record, dict) or set(record) != required or record["format"] != M2M100_INSTALL_FORMAT:
++        raise ValueError("installed M2M100 component record is invalid")
++    manifest = record["manifest"]
++    if (
++        not isinstance(manifest, dict)
++        or manifest.get("format") != M2M100_PACK_FORMAT
++        or manifest.get("component_id") != record["component_id"]
++        or not isinstance(manifest.get("files"), list)
++        or not manifest.get("files")
++    ):
++        raise ValueError("installed M2M100 component manifest is invalid")
++    for row in manifest.get("files", []):
++        relative = _safe_relative_path(row.get("path"))
++        if relative.parts[0] != "model":
++            raise ValueError("installed M2M100 component path is invalid")
++        path = component_root.joinpath(*relative.parts)
++        resolved = path.resolve(strict=True)
++        if path.is_symlink() or component_root not in resolved.parents:
++            raise ValueError("installed M2M100 component file escaped its root")
++        if resolved.stat().st_size != row.get("size") or sha256_file(resolved) != row.get("sha256"):
++            raise ValueError("installed M2M100 component file failed verification")
++    for name, key in (("LICENSE.txt", "license_sha256"), ("NOTICE.txt", "notice_sha256")):
++        path = component_root / name
++        if not path.is_file() or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != manifest.get(key):
++            raise ValueError("installed M2M100 component license or notice failed verification")
++    return record
++
++
++def installed_m2m100_components(model_root: Path) -> dict[str, dict[str, object]]:
++    root = _real_model_root(model_root)
++    result: dict[str, dict[str, object]] = {}
++    for path in root.iterdir():
++        if path.name.startswith(".") or not path.is_dir() or path.is_symlink():
++            continue
++        try:
++            record = load_installed_m2m100_component(path)
++        except (OSError, ValueError, json.JSONDecodeError):
++            continue
++        if record["component_id"] == path.name:
++            result[path.name] = record
++    return result
++
++
++def install_m2m100_pack(
++    pack_path: Path,
++    catalog_path: Path,
++    model_root: Path,
++    *,
++    replace: bool = False,
++) -> dict[str, object]:
++    audited = audit_m2m100_pack(pack_path, catalog_path)
++    component = audited["component"]
++    component_id = component["id"]
++    root = _real_model_root(model_root)
++    present = installed_m2m100_components(root)
++    missing = [dependency for dependency in component["requires"] if dependency not in present]
++    if missing:
++        raise ValueError("missing required M2M100 component(s): " + ", ".join(missing))
++    target = root / component_id
++    if target.exists() and not replace:
++        raise FileExistsError(f"M2M100 component is already installed: {component_id}")
++    staging = root / f".staging-{component_id}-{uuid.uuid4().hex}"
++    backup = root / f".backup-{component_id}-{uuid.uuid4().hex}"
++    staging.mkdir()
++    try:
++        with zipfile.ZipFile(audited["pack_path"], "r") as archive:
++            for name in ("LICENSE.txt", "NOTICE.txt"):
++                destination = staging / name
++                with archive.open(name, "r") as source, destination.open("xb") as output:
++                    shutil.copyfileobj(source, output, length=1024 * 1024)
++            for row in audited["manifest"]["files"]:
++                relative = _safe_relative_path(row["path"])
++                destination = staging.joinpath(*relative.parts)
++                destination.parent.mkdir(parents=True, exist_ok=True)
++                digest = hashlib.sha256()
++                written = 0
++                with archive.open(row["path"], "r") as source, destination.open("xb") as output:
++                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
++                        output.write(chunk)
++                        digest.update(chunk)
++                        written += len(chunk)
++                if written != row["size"] or digest.hexdigest() != row["sha256"]:
++                    raise ValueError("M2M100 model pack changed during installation")
++        record = {
++            "format": M2M100_INSTALL_FORMAT,
++            "component_id": component_id,
++            "pack_size": audited["pack_size"],
++            "pack_sha256": audited["pack_sha256"],
++            "manifest": audited["manifest"],
++        }
++        (staging / "installed.json").write_text(
++            json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
++            encoding="utf-8",
++            newline="\n",
++        )
++        load_installed_m2m100_component(staging)
++        if target.exists():
++            os.replace(target, backup)
++        try:
++            os.replace(staging, target)
++        except Exception:
++            if backup.exists() and not target.exists():
++                os.replace(backup, target)
++            raise
++        if backup.exists():
++            shutil.rmtree(backup)
++        return record
++    finally:
++        if staging.exists():
++            shutil.rmtree(staging)
++
++
+ def is_unsafe_source(text: str) -> bool:
+     """Conservatively suppress source strings shaped like commands or secrets."""
+     folded = text.casefold()
+@@ -535,7 +903,206 @@ class QuickMtRuntime:
+         return result
+ 
+ 
+-def _parse_translation_request(document: object) -> tuple[str, list[str]]:
++class MissingModelComponentError(FileNotFoundError):
++    """The selected model pack is not installed or failed its integrity check."""
++
++
++class MissingModelRuntimeError(FileNotFoundError):
++    """The selected model's local inference runtime is not installed."""
++
++
++class LocalModelRequestError(RuntimeError):
++    """The selected local inference runtime could not answer a request."""
++
++
++M2M100_LANGUAGE_CODES = (
++    "af", "am", "ar", "ast", "az", "ba", "be", "bg", "bn", "br", "bs",
++    "ca", "ceb", "cs", "cy", "da", "de", "el", "en", "es", "et", "fa",
++    "ff", "fi", "fr", "fy", "ga", "gd", "gl", "gu", "ha", "he", "hi",
++    "hr", "ht", "hu", "hy", "id", "ig", "ilo", "is", "it", "ja", "jv",
++    "ka", "kk", "km", "kn", "ko", "lb", "lg", "ln", "lo", "lt", "lv", "mg",
++    "mk", "ml", "mn", "mr", "ms", "my", "ne", "nl", "no", "ns", "oc", "or",
++    "pa", "pl", "ps", "pt", "ro", "ru", "sd", "si", "sk", "sl", "so", "sq",
++    "sr", "ss", "su", "sv", "sw", "ta", "th", "tl", "tn", "tr", "uk", "ur",
++    "uz", "vi", "wo", "xh", "yi", "yo", "zh", "zu",
++)
++
++
++class M2m100Tokenizer:
++    """Minimal offline tokenizer compatible with the official M2M100 tokenizer."""
++
++    def __init__(self, model_path: Path) -> None:
++        try:
++            import sentencepiece
++        except ImportError as error:
++            raise MissingModelRuntimeError("SentencePiece runtime is not installed") from error
++        try:
++            vocabulary = json.loads((model_path / "vocab.json").read_text(encoding="utf-8"))
++            shared_vocabulary = json.loads(
++                (model_path / "shared_vocabulary.json").read_text(encoding="utf-8")
++            )
++        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
++            raise MissingModelComponentError("installed M2M100 tokenizer files are unreadable") from error
++        if (
++            not isinstance(vocabulary, dict)
++            or vocabulary.get("<unk>") != 3
++            or not isinstance(shared_vocabulary, list)
++            or len(vocabulary) != 128004
++            or len(shared_vocabulary) != 128112
++        ):
++            raise MissingModelComponentError("installed M2M100 tokenizer metadata is invalid")
++        try:
++            self.sentencepiece = sentencepiece.SentencePieceProcessor(
++                model_file=str(model_path / "sentencepiece.bpe.model")
++            )
++        except (OSError, RuntimeError) as error:
++            raise MissingModelComponentError("installed M2M100 SentencePiece model is invalid") from error
++        self.language_tokens = {language: f"__{language}__" for language in M2M100_LANGUAGE_CODES}
++
++    def encode(self, text: str) -> list[str]:
++        return [
++            self.language_tokens["zh"],
++            *self.sentencepiece.encode(text, out_type=str),
++            "</s>",
++        ]
++
++    def target_prefix(self, language: str) -> str:
++        try:
++            return self.language_tokens[language]
++        except KeyError as error:
++            raise ValueError("unsupported target language") from error
++
++    def decode(self, tokens: Sequence[str]) -> str:
++        pieces: list[str] = []
++        for token in tokens:
++            if token in {"</s>", "<pad>"}:
++                break
++            if token.startswith("__") and token.endswith("__"):
++                continue
++            pieces.append(token)
++        try:
++            return self.sentencepiece.decode(pieces)
++        except (RuntimeError, TypeError) as error:
++            raise LocalModelRequestError("M2M100 returned invalid token output") from error
++
++
++class M2m100Stage:
++    def __init__(
++        self,
++        model_root: Path,
++        threads: int = 4,
++    ) -> None:
++        self.model_root = _real_model_root(model_root)
++        try:
++            import ctranslate2
++        except ImportError as error:
++            raise MissingModelRuntimeError("CTranslate2 runtime is not installed") from error
++        component_root = self.model_root
++        load_installed_m2m100_component(component_root)
++        model_path = component_root / "model"
++        self.tokenizer = M2m100Tokenizer(model_path)
++        try:
++            self.translator = ctranslate2.Translator(
++                str(model_path),
++                device="cpu",
++                compute_type="int8",
++                inter_threads=1,
++                intra_threads=max(1, min(threads, 8)),
++            )
++        except (OSError, RuntimeError) as error:
++            raise MissingModelComponentError("installed M2M100 CTranslate2 model is invalid") from error
++
++    def translate_hypotheses(
++        self,
++        texts: Sequence[str],
++        language: str,
++        *,
++        num_hypotheses: int = 1,
++    ) -> list[list[str]]:
++        if language not in SUPPORTED_LANGUAGES:
++            raise ValueError("unsupported target language")
++        encoded = [self.tokenizer.encode(text) for text in texts]
++        target_prefix = [[self.tokenizer.target_prefix(language)] for _ in texts]
++        results = self.translator.translate_batch(
++            encoded,
++            target_prefix=target_prefix,
++            max_batch_size=MAX_WORDS,
++            batch_type="examples",
++            beam_size=4,
++            num_hypotheses=num_hypotheses,
++            max_input_length=64,
++            max_decoding_length=64,
++            return_scores=False,
++        )
++        return [
++            [self.tokenizer.decode(hypothesis) for hypothesis in result.hypotheses]
++            for result in results
++        ]
++
++
++class M2m100Runtime:
++    def __init__(self, model_root: Path, catalog_path: Path, *, threads: int = 4) -> None:
++        self.model_root = _real_model_root(model_root)
++        self.catalog = load_m2m100_pack_catalog(catalog_path)
++        self.threads = threads
++        self._stage: M2m100Stage | None = None
++
++    def available_languages(self) -> list[str]:
++        present = installed_m2m100_components(self.model_root)
++        return sorted(
++            language
++            for language, component_ids in self.catalog["routes"].items()
++            if all(component_id in present for component_id in component_ids)
++        )
++
++    def _stage_for(self, language: str) -> M2m100Stage:
++        route = self.catalog["routes"].get(language)
++        if not isinstance(route, list) or len(route) != 1:
++            raise ValueError("M2M100 route is invalid")
++        present = installed_m2m100_components(self.model_root)
++        missing = [component_id for component_id in route if component_id not in present]
++        if missing:
++            raise MissingModelComponentError(
++                "missing required M2M100 component(s): " + ", ".join(missing)
++            )
++        component_root = self.model_root / route[0]
++        if self._stage is None:
++            self._stage = M2m100Stage(component_root, threads=self.threads)
++        return self._stage
++
++    def translate(self, words: Sequence[str], language: str) -> dict[str, str]:
++        if language not in SUPPORTED_LANGUAGES:
++            raise ValueError("unsupported target language")
++        unique: list[str] = []
++        for word in words:
++            if (
++                not isinstance(word, str)
++                or not word
++                or len(word.encode("utf-8")) > MAX_WORD_BYTES
++                or any(character in word for character in "\r\n\t")
++            ):
++                raise ValueError("invalid source word")
++            if word not in unique:
++                unique.append(word)
++        if not unique or len(unique) > MAX_WORDS:
++            raise ValueError("request must contain one to nine unique words")
++        submitted = [word for word in unique if not is_unsafe_source(word)]
++        if not submitted:
++            return {}
++        stage = self._stage_for(language)
++        rows = stage.translate_hypotheses(submitted, language, num_hypotheses=1)
++        result: dict[str, str] = {}
++        for source, hypotheses in zip(submitted, rows, strict=True):
++            gloss = combine_hypotheses(hypotheses, language=language, max_glosses=1)
++            if gloss:
++                result[source] = gloss
++        return result
++
++    def close(self) -> None:
++        self._stage = None
++
++
++def _parse_translation_request(document: object) -> tuple[str, list[str], str]:
+     if not isinstance(document, dict):
+         raise ValueError("request must be an object")
+     messages = document.get("messages")
+@@ -545,22 +1112,41 @@ def _parse_translation_request(document: object) -> tuple[str, list[str]]:
+     if len(user_messages) != 1 or not isinstance(user_messages[0].get("content"), str):
+         raise ValueError("request must have exactly one user message")
+     payload = json.loads(user_messages[0]["content"])
+-    if not isinstance(payload, dict) or set(payload) != {"target_language", "words"}:
++    if not isinstance(payload, dict) or not set(payload).issubset(
++        {"target_language", "words", "model"}
++    ) or not {"target_language", "words"}.issubset(payload):
+         raise ValueError("translation payload has unexpected keys")
+     language = payload["target_language"]
+     words = payload["words"]
+-    if language not in SUPPORTED_LANGUAGES or not isinstance(words, list):
++    model = payload.get("model", QUICKMT_MODEL_ID)
++    if (
++        language not in SUPPORTED_LANGUAGES
++        or not isinstance(words, list)
++        or not isinstance(model, str)
++        or model not in SUPPORTED_MODELS
++    ):
+         raise ValueError("translation payload is invalid")
+-    return language, words
++    return language, words, model
+ 
+ 
+ class ModelHostServer(HTTPServer):
+-    def __init__(self, address: tuple[str, int], token: str, runtime: QuickMtRuntime) -> None:
++    def __init__(
++        self,
++        address: tuple[str, int],
++        token: str,
++        quickmt: QuickMtRuntime,
++        m2m100: M2m100Runtime | None,
++    ) -> None:
+         super().__init__(address, ModelHostHandler)
+         self.token = token
+-        self.runtime = runtime
++        self.quickmt = quickmt
++        self.m2m100 = m2m100
+         self.last_request = time.monotonic()
+ 
++    def close_runtimes(self) -> None:
++        if self.m2m100 is not None:
++            self.m2m100.close()
++
+ 
+ class ModelHostHandler(BaseHTTPRequestHandler):
+     server: ModelHostServer
+@@ -591,7 +1177,20 @@ class ModelHostHandler(BaseHTTPRequestHandler):
+             self._json(404, {"error": "not-found"})
+             return
+         self.server.last_request = time.monotonic()
+-        self._json(200, {"status": "ok", "languages": self.server.runtime.available_languages()})
++        m2m100_languages = (
++            self.server.m2m100.available_languages() if self.server.m2m100 else []
++        )
++        self._json(
++            200,
++            {
++                "status": "ok",
++                "languages": self.server.quickmt.available_languages(),
++                "models": {
++                    QUICKMT_MODEL_ID: {"languages": self.server.quickmt.available_languages()},
++                    M2M100_MODEL_ID: {"languages": m2m100_languages},
++                },
++            },
++        )
+ 
+     def do_POST(self) -> None:
+         if not self._authorized():
+@@ -610,17 +1209,38 @@ class ModelHostHandler(BaseHTTPRequestHandler):
+         self.server.last_request = time.monotonic()
+         try:
+             request = json.loads(self.rfile.read(length).decode("utf-8"))
+-            language, words = _parse_translation_request(request)
+-            result = self.server.runtime.translate(words, language)
+-        except FileNotFoundError:
+-            self._json(409, {"error": "missing-model-component"})
++            language, words, model = _parse_translation_request(request)
++            if model == M2M100_MODEL_ID:
++                if self.server.m2m100 is None:
++                    raise MissingModelRuntimeError("M2M100 runtime is not installed")
++                result = self.server.m2m100.translate(words, language)
++            else:
++                result = self.server.quickmt.translate(words, language)
++        except MissingModelComponentError as error:
++            self._json(409, {"error": "missing-model-component", "detail": str(error)})
++            self.server.last_request = time.monotonic()
++            return
++        except MissingModelRuntimeError as error:
++            self._json(409, {"error": "missing-model-runtime", "detail": str(error)})
++            self.server.last_request = time.monotonic()
++            return
++        except FileNotFoundError as error:
++            self._json(409, {"error": "missing-model-component", "detail": str(error)})
++            self.server.last_request = time.monotonic()
+             return
+         except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+             self._json(400, {"error": "invalid-request"})
++            self.server.last_request = time.monotonic()
++            return
++        except LocalModelRequestError as error:
++            self._json(502, {"error": "local-model-failed", "detail": str(error)})
++            self.server.last_request = time.monotonic()
+             return
+         except Exception:
+             self._json(500, {"error": "translation-failed"})
++            self.server.last_request = time.monotonic()
+             return
++        self.server.last_request = time.monotonic()
+         content = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+         self._json(
+             200,
+@@ -636,6 +1256,7 @@ def serve(
+     model_root: Path,
+     catalog_path: Path,
+     *,
++    m2m100_catalog_path: Path | None,
+     port: int,
+     token: str,
+     idle_seconds: int,
+@@ -643,14 +1264,18 @@ def serve(
+ ) -> None:
+     if len(token) < 32 or any(character.isspace() for character in token):
+         raise ValueError("host token must contain at least 32 non-whitespace characters")
+-    runtime = QuickMtRuntime(model_root, catalog_path, threads=threads)
+-    server = ModelHostServer(("127.0.0.1", port), token, runtime)
++    quickmt = QuickMtRuntime(model_root, catalog_path, threads=threads)
++    m2m100 = None
++    if m2m100_catalog_path is not None and m2m100_catalog_path.is_file():
++        m2m100 = M2m100Runtime(model_root, m2m100_catalog_path, threads=threads)
++    server = ModelHostServer(("127.0.0.1", port), token, quickmt, m2m100)
+     server.timeout = 1.0
+     print(f"READY {server.server_port}", flush=True)
+     try:
+         while time.monotonic() - server.last_request < idle_seconds:
+             server.handle_request()
+     finally:
++        server.close_runtimes()
+         server.server_close()
+ 
+ 
+@@ -676,7 +1301,21 @@ def default_model_root() -> Path:
+     return Path(user_dir) / "language_input" / "models"
+ 
+ 
+-def manage_models(catalog_path: Path, model_root: Path) -> int:
++def _pack_manifest_format(pack_path: Path) -> str | None:
++    try:
++        with zipfile.ZipFile(pack_path, "r") as archive:
++            manifest = _read_small_archive_json(archive, "manifest.json")
++    except (OSError, KeyError, ValueError, zipfile.BadZipFile, json.JSONDecodeError):
++        return None
++    value = manifest.get("format")
++    return value if isinstance(value, str) else None
++
++
++def manage_models(
++    catalog_path: Path,
++    model_root: Path,
++    m2m100_catalog_path: Path | None = None,
++) -> int:
+     if os.name != "nt":
+         raise RuntimeError("the graphical model importer is available only on Windows")
+     import ctypes
+@@ -722,8 +1361,14 @@ def manage_models(catalog_path: Path, model_root: Path) -> int:
+     if not ctypes.windll.comdlg32.GetOpenFileNameW(ctypes.byref(dialog)):
+         return 0
+     pack_path = Path(selected.value)
++    m2m100_pack = _pack_manifest_format(pack_path) == M2M100_PACK_FORMAT
+     try:
+-        record = install_pack(pack_path, catalog_path, model_root)
++        if m2m100_pack:
++            if m2m100_catalog_path is None:
++                raise ValueError("M2M100 catalog is not installed")
++            record = install_m2m100_pack(pack_path, m2m100_catalog_path, model_root)
++        else:
++            record = install_pack(pack_path, catalog_path, model_root)
+     except FileExistsError:
+         answer = message_box(
+             None,
+@@ -734,7 +1379,14 @@ def manage_models(catalog_path: Path, model_root: Path) -> int:
+         if answer != 6:
+             return 0
+         try:
+-            record = install_pack(pack_path, catalog_path, model_root, replace=True)
++            if m2m100_pack:
++                if m2m100_catalog_path is None:
++                    raise ValueError("M2M100 catalog is not installed")
++                record = install_m2m100_pack(
++                    pack_path, m2m100_catalog_path, model_root, replace=True
++                )
++            else:
++                record = install_pack(pack_path, catalog_path, model_root, replace=True)
+         except Exception as error:
+             message_box(None, str(error), "Language pack import failed", 0x00000010)
+             return 1
+@@ -753,6 +1405,7 @@ def manage_models(catalog_path: Path, model_root: Path) -> int:
+ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--catalog", required=True, type=Path)
++    parser.add_argument("--m2m100-catalog", type=Path)
+     parser.add_argument("--models", type=Path)
+     actions = parser.add_mutually_exclusive_group(required=True)
+     actions.add_argument("--audit-pack", type=Path)
+@@ -760,6 +1413,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+     actions.add_argument("--list", action="store_true")
+     actions.add_argument("--serve", action="store_true")
+     actions.add_argument("--manage", action="store_true")
++    parser.add_argument(
++        "--m2m100",
++        action="store_true",
++        help="use the independent M2M100/MIT pack catalog for audit/import/list",
++    )
+     parser.add_argument("--replace", action="store_true")
+     parser.add_argument("--port", type=int, default=0)
+     parser.add_argument("--token")
+@@ -771,7 +1429,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+ def main(argv: Sequence[str] | None = None) -> int:
+     args = parse_args(argv if argv is not None else sys.argv[1:])
+     if args.audit_pack:
+-        result = audit_pack(args.audit_pack, args.catalog)
++        if args.m2m100:
++            if args.m2m100_catalog is None:
++                raise ValueError("--m2m100-catalog is required for --m2m100")
++            result = audit_m2m100_pack(args.audit_pack, args.m2m100_catalog)
++        else:
++            result = audit_pack(args.audit_pack, args.catalog)
+         print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
+         return 0
+     if args.manage and args.models is None:
+@@ -779,21 +1442,36 @@ def main(argv: Sequence[str] | None = None) -> int:
+     if args.models is None:
+         raise ValueError("--models is required for this action")
+     if args.import_pack:
+-        result = install_pack(args.import_pack, args.catalog, args.models, replace=args.replace)
++        if args.m2m100:
++            if args.m2m100_catalog is None:
++                raise ValueError("--m2m100-catalog is required for --m2m100")
++            result = install_m2m100_pack(
++                args.import_pack,
++                args.m2m100_catalog,
++                args.models,
++                replace=args.replace,
++            )
++        else:
++            result = install_pack(args.import_pack, args.catalog, args.models, replace=args.replace)
+         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+         return 0
+     if args.list:
+-        result = installed_components(args.models)
++        result = (
++            installed_m2m100_components(args.models)
++            if args.m2m100
++            else installed_components(args.models)
++        )
+         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+         return 0
+     if args.manage:
+-        return manage_models(args.catalog, args.models)
++        return manage_models(args.catalog, args.models, args.m2m100_catalog)
+     if args.serve:
+         if not args.token or not 0 <= args.port <= 65535 or args.idle_seconds < 1:
+             raise ValueError("--serve requires a valid --token, --port and idle timeout")
+         serve(
+             args.models,
+             args.catalog,
++            m2m100_catalog_path=args.m2m100_catalog,
+             port=args.port,
+             token=args.token,
+             idle_seconds=args.idle_seconds,
+diff --git a/scripts/stage_language_input.ps1 b/scripts/stage_language_input.ps1
+index 3983556..505df5f 100644
+--- a/scripts/stage_language_input.ps1
++++ b/scripts/stage_language_input.ps1
+@@ -1,10 +1,13 @@
+ [CmdletBinding()]
+ param(
+-  [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
++  [string]$RepositoryRoot
+ )
+ 
+ $ErrorActionPreference = 'Stop'
+ $utf8NoBom = [Text.UTF8Encoding]::new($false)
++if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
++  $RepositoryRoot = Split-Path -Parent $PSScriptRoot
++}
+ $root = [IO.Path]::GetFullPath($RepositoryRoot)
+ $sourceRoot = Join-Path $root 'language-input'
+ $rimeSource = Join-Path $sourceRoot 'rime'
+@@ -12,8 +15,20 @@ $licenseSource = Join-Path $sourceRoot 'licenses'
+ $readmeSource = Join-Path $sourceRoot 'README.zh-CN.md'
+ $privacySource = Join-Path $sourceRoot 'PRIVACY.zh-CN.md'
+ $modelCatalogSource = Join-Path $sourceRoot 'models\packs-v2.json'
++$m2m100CatalogSource = Join-Path $sourceRoot 'models\m2m100-packs-v1.json'
+ $outputData = Join-Path $root 'output\data'
+ $outputRoot = Join-Path $root 'output'
++$obsoleteOutputFiles = @(
++  (Join-Path $outputData 'language_input\models\gguf-packs-v1.json'),
++  (Join-Path $outputData 'licenses\language-input\HY-MT2-APACHE-2.0-NOTICE.txt')
++)
++
++function Get-RelativePathText {
++  param([string]$BasePath, [string]$TargetPath)
++  $baseUri = [Uri]::new(([IO.Path]::GetFullPath($BasePath).TrimEnd('\') + '\'))
++  $targetUri = [Uri]::new([IO.Path]::GetFullPath($TargetPath))
++  return [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
++}
+ 
+ foreach ($required in @(
+   $rimeSource,
+@@ -21,6 +36,7 @@ foreach ($required in @(
+   $readmeSource,
+   $privacySource,
+   $modelCatalogSource,
++  $m2m100CatalogSource,
+   $outputData
+ )) {
+   if (-not (Test-Path -LiteralPath $required)) {
+@@ -28,6 +44,12 @@ foreach ($required in @(
+   }
+ }
+ 
++foreach ($obsolete in $obsoleteOutputFiles) {
++  if (Test-Path -LiteralPath $obsolete -PathType Leaf) {
++    Remove-Item -LiteralPath $obsolete -Force
++  }
++}
++
+ $manifestPath = Join-Path $rimeSource 'language_input\gloss\en.manifest.json'
+ $packPath = Join-Path $rimeSource 'language_input\gloss\en.tsv'
+ $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+@@ -40,7 +62,7 @@ function Copy-TreeFiles {
+   param([string]$Source, [string]$Destination)
+   $destinationPrefix = [IO.Path]::GetFullPath($Destination).TrimEnd('\') + '\'
+   foreach ($file in Get-ChildItem -LiteralPath $Source -File -Recurse) {
+-    $relative = [IO.Path]::GetRelativePath($Source, $file.FullName)
++    $relative = Get-RelativePathText $Source $file.FullName
+     $target = [IO.Path]::GetFullPath((Join-Path $Destination $relative))
+     if (-not $target.StartsWith($destinationPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+       throw "Staging target escaped output data directory: $target"
+@@ -56,6 +78,8 @@ Copy-TreeFiles $licenseSource (Join-Path $outputData 'licenses\language-input')
+ New-Item -ItemType Directory -Path (Join-Path $outputData 'language_input\models') -Force | Out-Null
+ Copy-Item -LiteralPath $modelCatalogSource `
+   -Destination (Join-Path $outputData 'language_input\models\packs-v2.json') -Force
++Copy-Item -LiteralPath $m2m100CatalogSource `
++  -Destination (Join-Path $outputData 'language_input\models\m2m100-packs-v1.json') -Force
+ Copy-Item -LiteralPath $readmeSource `
+   -Destination (Join-Path $outputRoot 'LANGUAGE-INPUT-README.txt') -Force
+ Copy-Item -LiteralPath $privacySource `
+@@ -85,6 +109,7 @@ $defaultText = $pageSizePattern.Replace($defaultText, '${1} 9', 1)
+ $desiredSavedOptions = @(
+   'language_input_gloss'
+   'language_input_ai'
++  'language_input_model_m2m100'
+   'language_input_en'
+   'language_input_ja'
+   'language_input_es'
+diff --git a/scripts/stage_model_host.ps1 b/scripts/stage_model_host.ps1
+index 4f9f238..6c19130 100644
+--- a/scripts/stage_model_host.ps1
++++ b/scripts/stage_model_host.ps1
+@@ -2,16 +2,27 @@
+ param(
+   [Parameter(Mandatory = $true)]
+   [string]$HostBundle,
+-  [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
++  [string]$RepositoryRoot
+ )
+ 
+ $ErrorActionPreference = 'Stop'
++$utf8NoBom = [Text.UTF8Encoding]::new($false)
++if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
++  $RepositoryRoot = Split-Path -Parent $PSScriptRoot
++}
+ $root = [IO.Path]::GetFullPath($RepositoryRoot)
+ $outputRoot = [IO.Path]::GetFullPath((Join-Path $root 'output'))
+ $source = [IO.Path]::GetFullPath($HostBundle)
+ $destination = [IO.Path]::GetFullPath((Join-Path $outputRoot 'model-host'))
+ $outputPrefix = $outputRoot.TrimEnd('\') + '\'
+ 
++function Get-RelativePathText {
++  param([string]$BasePath, [string]$TargetPath)
++  $baseUri = [Uri]::new(([IO.Path]::GetFullPath($BasePath).TrimEnd('\') + '\'))
++  $targetUri = [Uri]::new([IO.Path]::GetFullPath($TargetPath))
++  return [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
++}
++
+ if (-not $destination.StartsWith($outputPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+   throw "Model-host destination escaped output: $destination"
+ }
+@@ -36,7 +47,6 @@ $files = @(Get-ChildItem -LiteralPath $source -Recurse -File -Force)
+ if ($files.Count -eq 0 -or @($files | Where-Object Extension -eq '.pdb').Count -ne 0) {
+   throw 'HostBundle is empty or contains debug symbols.'
+ }
+-
+ if (Test-Path -LiteralPath $destination) {
+   $resolvedDestination = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $destination))
+   if (-not $resolvedDestination.StartsWith($outputPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+@@ -47,7 +57,7 @@ if (Test-Path -LiteralPath $destination) {
+ New-Item -ItemType Directory -Path $destination | Out-Null
+ 
+ $manifestFiles = foreach ($file in $files) {
+-  $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
++  $relative = Get-RelativePathText $source $file.FullName
+   $target = [IO.Path]::GetFullPath((Join-Path $destination $relative))
+   if (-not $target.StartsWith($destination.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+     throw "Host staging target escaped destination: $target"
+@@ -68,7 +78,8 @@ $manifest = [ordered]@{
+   files = @($manifestFiles)
+ }
+ $manifestPath = Join-Path $outputRoot 'model-host.manifest.json'
+-$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
++$manifestText = $manifest | ConvertTo-Json -Depth 5
++[IO.File]::WriteAllText($manifestPath, $manifestText + [Environment]::NewLine, $utf8NoBom)
+ 
+ [pscustomobject]@{
+   Destination = $destination
+diff --git a/tests/native/LanguageInputRemoteTests.cpp b/tests/native/LanguageInputRemoteTests.cpp
+index a4fc5ec..a8ca4c7 100644
+--- a/tests/native/LanguageInputRemoteTests.cpp
++++ b/tests/native/LanguageInputRemoteTests.cpp
+@@ -58,10 +58,71 @@ void WriteCache(const std::filesystem::path& path,
+ }  // namespace
+ 
+ int wmain(int argc, wchar_t** argv) {
++  if (argc > 1 && std::wstring(argv[1]) == L"--serve") {
++    // Test-only child used to exercise the local-host worker path without
++    // starting a real model runtime.
++    std::this_thread::sleep_for(std::chrono::seconds(30));
++    return 0;
++  }
++
++  if (argc == 4 && std::wstring(argv[1]) == L"--installed-smoke") {
++    using namespace std::chrono_literals;
++    using weasel::language_input::RemoteGlossConfig;
++    using weasel::language_input::RemoteGlossError;
++    using weasel::language_input::RemoteGlossService;
++
++    const auto install_root = std::filesystem::absolute(argv[2]);
++    const auto model_root = std::filesystem::absolute(argv[3]);
++    const auto smoke_root =
++        std::filesystem::absolute(L".cache") /
++        (L"installed-remote-smoke-" + std::to_wstring(GetCurrentProcessId()));
++    std::error_code smoke_error;
++    std::filesystem::remove_all(smoke_root, smoke_error);
++    std::filesystem::create_directories(smoke_root);
++
++    RemoteGlossConfig config;
++    config.enabled = true;
++    config.use_local_host = true;
++    config.model = "m2m100-418m-int8";
++    config.language = "en";
++    config.cache_path = smoke_root / L"cache.json";
++    config.local_host_executable = install_root / L"LanguageInputModelHost.exe";
++    config.local_host_catalog =
++        install_root / L"data" / L"language_input" / L"models" /
++        L"packs-v2.json";
++    config.local_host_m2m100_catalog =
++        install_root / L"data" / L"language_input" / L"models" /
++        L"m2m100-packs-v1.json";
++    config.local_host_models = model_root;
++
++    std::atomic<int> completions = 0;
++    {
++      RemoteGlossService service(config, {}, [&](uintptr_t) { ++completions; });
++      Check(service.available(), "the installed C++ smoke configuration is usable");
++      service.SetSessionSensitive(42, false);
++      service.QueueMissing(42, "en", {u8"你好"}, config.model);
++      Check(service.WaitUntilIdleForTesting(90s),
++            "the installed C++ smoke request should finish");
++      auto gloss = service.Lookup(42, "en", u8"你好", config.model);
++      Check(gloss && gloss->text == "Hello",
++            "the installed C++ smoke request should return the M2M100 gloss");
++      Check(service.TakeLastError(42) == RemoteGlossError::kNone,
++            "the installed C++ smoke request should not report an error");
++      Check(completions == 1,
++            "the installed C++ smoke request should refresh the UI once");
++    }
++    std::filesystem::remove_all(smoke_root, smoke_error);
++    if (failures == 0)
++      std::cout << "LanguageInputRemoteInstalledSmoke: passed\n";
++    return failures == 0 ? 0 : 1;
++  }
++
+   using namespace std::chrono_literals;
+   using weasel::language_input::BuildRemoteGlossRequest;
+   using weasel::language_input::ParseRemoteGlossResponse;
+   using weasel::language_input::RemoteGlossMap;
++  using weasel::language_input::RemoteGlossError;
++  using weasel::language_input::RemoteGlossTransportResult;
+   using weasel::language_input::RemoteGlossService;
+ 
+   if (argc != 2) {
+@@ -111,10 +172,10 @@ int wmain(int argc, wchar_t** argv) {
+   std::vector<std::string> received_words;
+   auto normal_transport = [&](const auto&,
+                               const std::vector<std::string>& words)
+-      -> std::optional<RemoteGlossMap> {
++      -> RemoteGlossTransportResult {
+     ++normal_calls;
+     received_words = words;
+-    return RemoteGlossMap{{u8"缺词", "missing term"}};
++    return {RemoteGlossMap{{u8"缺词", "missing term"}}, RemoteGlossError::kNone};
+   };
+   {
+     RemoteGlossService service(
+@@ -144,11 +205,12 @@ int wmain(int argc, wchar_t** argv) {
+   std::vector<std::string> requested_languages;
+   auto language_transport =
+       [&](const auto& request_config,
+-          const std::vector<std::string>&) -> std::optional<RemoteGlossMap> {
++          const std::vector<std::string>&) -> RemoteGlossTransportResult {
+     requested_languages.push_back(request_config.language);
+-    return RemoteGlossMap{{u8"文件夹",
+-                           request_config.language == "ja" ? u8"フォルダ"
+-                                                            : "folder"}};
++    return {RemoteGlossMap{{u8"文件夹",
++                            request_config.language == "ja" ? u8"フォルダ"
++                                                             : "folder"}},
++            RemoteGlossError::kNone};
+   };
+   {
+     RemoteGlossService service(
+@@ -170,6 +232,100 @@ int wmain(int argc, wchar_t** argv) {
+           "each queued language must reach the transport independently");
+   }
+ 
++  std::vector<std::string> requested_models;
++  auto model_transport =
++      [&](const auto& request_config,
++          const std::vector<std::string>&) -> RemoteGlossTransportResult {
++    requested_models.push_back(request_config.model);
++    return {RemoteGlossMap{{u8"模型词",
++                            requested_models.size() == 1
++                                ? "Quick gloss"
++                                : "M2M100 gloss"}},
++            RemoteGlossError::kNone};
++  };
++  {
++    RemoteGlossService service(
++        TestConfig(test_root / L"models" / L"cache.json"), model_transport);
++    service.SetSessionSensitive(5, false);
++    service.QueueMissing(5, "en", {u8"模型词"}, "quickmt-gloss-route-v2");
++    Check(service.WaitUntilIdleForTesting(2s),
++          "the QuickMT model request should finish");
++    service.QueueMissing(5, "en", {u8"模型词"}, "m2m100-418m-int8");
++    Check(service.WaitUntilIdleForTesting(2s),
++          "the M2M100 model request should finish");
++    auto quick = service.Lookup(5, "en", u8"模型词", "quickmt-gloss-route-v2");
++    auto m2m100 = service.Lookup(5, "en", u8"模型词", "m2m100-418m-int8");
++    Check(quick && quick->text == "Quick gloss" && m2m100 &&
++              m2m100->text == "M2M100 gloss",
++          "model selection must isolate cache entries");
++    Check(requested_models == std::vector<std::string>({"test-model", "test-model"}),
++          "legacy remote model selection must remain unchanged");
++  }
++
++  std::atomic<int> missing_completions = 0;
++  auto missing_model_transport =
++      [&](const auto&, const std::vector<std::string>&)
++          -> RemoteGlossTransportResult {
++    return {std::nullopt, RemoteGlossError::kMissingModel};
++  };
++  {
++    RemoteGlossService service(
++        TestConfig(test_root / L"missing" / L"cache.json"),
++        missing_model_transport,
++        [&](uintptr_t) { ++missing_completions; });
++    service.SetSessionSensitive(6, false);
++    service.QueueMissing(6, "en", {u8"未导入"}, "m2m100-418m-int8");
++    Check(service.WaitUntilIdleForTesting(2s),
++          "the missing-model request should finish without blocking");
++    Check(service.TakeLastError(6) == RemoteGlossError::kMissingModel,
++          "missing model must be surfaced as a typed error");
++    Check(service.TakeLastError(6) == RemoteGlossError::kNone,
++          "consuming a model error must clear it");
++    Check(missing_completions == 1,
++          "a missing model must refresh the UI with an explicit error");
++  }
++
++  std::atomic<int> local_transport_failures = 0;
++  std::atomic<int> local_failure_completions = 0;
++  auto local_failure_transport =
++      [&](const auto&, const std::vector<std::string>&)
++          -> RemoteGlossTransportResult {
++    ++local_transport_failures;
++    return {std::nullopt, RemoteGlossError::kTransport};
++  };
++  {
++    const auto local_failure_root = test_root / L"local-transport-failure";
++    std::filesystem::create_directories(local_failure_root / L"models");
++    const auto local_failure_cache = local_failure_root / L"cache.json";
++    {
++      std::ofstream stream(local_failure_cache,
++                           std::ios::binary | std::ios::trunc);
++      stream << "{}";
++    }
++    auto local_config = TestConfig(local_failure_cache);
++    local_config.use_local_host = true;
++    local_config.model = "m2m100-418m-int8";
++    local_config.local_host_executable =
++        std::filesystem::absolute(std::filesystem::path(argv[0]));
++    local_config.local_host_catalog = local_failure_cache;
++    local_config.local_host_models = local_failure_root / L"models";
++    RemoteGlossService service(
++        local_config, local_failure_transport,
++        [&](uintptr_t) { ++local_failure_completions; });
++    Check(service.available(),
++          "the local transport retry regression fixture must be usable");
++    service.SetSessionSensitive(7, false);
++    service.QueueMissing(7, "en", {u8"本地失败"}, local_config.model);
++    Check(service.WaitUntilIdleForTesting(2s),
++          "a local transport failure must finish without repeated retries");
++    Check(local_transport_failures == 1,
++          "a local transport failure must issue exactly one request");
++    Check(service.TakeLastError(7) == RemoteGlossError::kTransport,
++          "a local transport failure must be surfaced to the UI");
++    Check(local_failure_completions == 1,
++          "a local transport failure must refresh the UI once");
++  }
++
+   const auto lazy_cache = test_root / L"lazy" / L"cache.json";
+   WriteCache(lazy_cache, "en", u8"旧词", "old value");
+   {
+@@ -191,12 +347,13 @@ int wmain(int argc, wchar_t** argv) {
+   bool release = false;
+   auto delayed_transport =
+       [&](const auto&,
+-          const std::vector<std::string>&) -> std::optional<RemoteGlossMap> {
++          const std::vector<std::string>&) -> RemoteGlossTransportResult {
+     std::unique_lock<std::mutex> lock(gate_mutex);
+     started = true;
+     gate.notify_all();
+     gate.wait(lock, [&] { return release; });
+-    return RemoteGlossMap{{u8"敏感词", "sensitive term"}};
++    return {RemoteGlossMap{{u8"敏感词", "sensitive term"}},
++            RemoteGlossError::kNone};
+   };
+   const auto dropped_cache = test_root / L"dropped" / L"cache.json";
+   std::atomic<int> dropped_completions = 0;
+diff --git a/tests/test_language_input_model_host.py b/tests/test_language_input_model_host.py
+index 381fce4..5bfe008 100644
+--- a/tests/test_language_input_model_host.py
++++ b/tests/test_language_input_model_host.py
+@@ -11,13 +11,18 @@ import urllib.request
+ import zipfile
+ from pathlib import Path
+ 
++from scripts.build_m2m100_model_pack import build_pack as build_m2m100_pack
+ from scripts.build_limodel_pack import build_pack
+ from scripts.language_input_model_host import (
+     audit_pack,
++    audit_m2m100_pack,
+     combine_hypotheses,
+     install_pack,
++    install_m2m100_pack,
++    installed_m2m100_components,
+     installed_components,
+     is_unsafe_source,
++    load_m2m100_pack_catalog,
+     load_pack_catalog,
+ )
+ 
+@@ -131,6 +136,95 @@ class LanguageInputModelHostTests(unittest.TestCase):
+         )
+         return catalog, packs
+ 
++    def make_m2m100_pack(self, root: Path) -> tuple[Path, Path]:
++        model_root = root / "m2m100-model"
++        model_root.mkdir()
++        files = {
++            "config.json": b"{}",
++            "model.bin": b"fixture-m2m100-model",
++            "sentencepiece.bpe.model": b"fixture-sentencepiece",
++            "shared_vocabulary.json": b"[]",
++            "vocab.json": b"{}",
++        }
++        for name, payload in files.items():
++            (model_root / name).write_bytes(payload)
++        license_path = root / "LICENSE.txt"
++        license_path.write_text("MIT License\n", encoding="utf-8")
++        notice_path = root / "M2M100-NOTICE.txt"
++        notice_path.write_text("M2M100 attribution\n", encoding="utf-8")
++        input_path = root / "m2m100-input.json"
++        input_path.write_text(
++            json.dumps(
++                {
++                    "schema_version": 1,
++                    "component_id": "fixture-m2m100",
++                    "display_name": "Fixture M2M100",
++                    "repository": "facebook/m2m100_418M",
++                    "revision": "a" * 40,
++                    "license": "MIT",
++                    "provides": ["en", "ja", "es"],
++                    "requires": [],
++                    "source": {
++                        "file_name": "pytorch_model.bin",
++                        "size": 123,
++                        "sha256": "b" * 64,
++                    },
++                }
++            ),
++            encoding="utf-8",
++        )
++        pack = root / "fixture-m2m100.limodel"
++        built = build_m2m100_pack(
++            input_path=input_path,
++            model_root=model_root,
++            license_path=license_path,
++            notice_path=notice_path,
++            output_path=pack,
++        )
++        component = built["manifest"]
++        catalog = root / "m2m100-packs-v1.json"
++        catalog.write_text(
++            json.dumps(
++                {
++                    "schema_version": 1,
++                    "format": "language-input-m2m100-model-pack-v1",
++                    "route_id": "fixture-m2m100",
++                    "runtime": {
++                        "host": "LanguageInputModelHost",
++                        "architecture": "x64",
++                        "ctranslate2": "4.8.1",
++                        "sentencepiece": "0.2.1",
++                    },
++                    "components": [
++                        {
++                            "id": "fixture-m2m100",
++                            "display_name": "Fixture M2M100",
++                            "file_name": pack.name,
++                            "file_size": pack.stat().st_size,
++                            "file_sha256": hashlib.sha256(pack.read_bytes()).hexdigest(),
++                            "revision": "a" * 40,
++                            "repository": "facebook/m2m100_418M",
++                            "provides": ["en", "ja", "es"],
++                            "requires": [],
++                            "license": "MIT",
++                            "license_sha256": component["license_sha256"],
++                            "notice_sha256": component["notice_sha256"],
++                            "runtime_bytes": component["runtime_bytes"],
++                            "files": component["files"],
++                            "source": component["source"],
++                        }
++                    ],
++                    "routes": {
++                        "en": ["fixture-m2m100"],
++                        "ja": ["fixture-m2m100"],
++                        "es": ["fixture-m2m100"],
++                    },
++                }
++            ),
++            encoding="utf-8",
++        )
++        return pack, catalog
++
+     def test_audit_and_install_exact_catalog_pack(self) -> None:
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+@@ -174,6 +268,92 @@ class LanguageInputModelHostTests(unittest.TestCase):
+             with self.assertRaisesRegex(ValueError, "exact artifact"):
+                 audit_pack(pack, catalog)
+ 
++    def test_m2m100_pack_is_independent_and_keeps_mit_metadata(self) -> None:
++        with tempfile.TemporaryDirectory() as temporary:
++            root = Path(temporary)
++            pack, catalog = self.make_m2m100_pack(root)
++            loaded = load_m2m100_pack_catalog(catalog)
++            self.assertEqual("MIT", loaded["components"][0]["license"])
++            audited = audit_m2m100_pack(pack, catalog)
++            self.assertEqual("fixture-m2m100", audited["component"]["id"])
++            models = root / "models"
++            installed = install_m2m100_pack(pack, catalog, models)
++            self.assertEqual("fixture-m2m100", installed["component_id"])
++            self.assertEqual({"fixture-m2m100"}, set(installed_m2m100_components(models)))
++
++    def test_explicit_m2m100_request_reports_missing_model_without_quick_fallback(self) -> None:
++        with tempfile.TemporaryDirectory() as temporary:
++            root = Path(temporary)
++            quick_catalog, _ = self.make_three_pack_catalog(root)
++            _, m2m100_catalog = self.make_m2m100_pack(root)
++            models = root / "models"
++            token = "m" * 64
++            process = subprocess.Popen(
++                [
++                    sys.executable,
++                    str(Path(__file__).parents[1] / "scripts" / "language_input_model_host.py"),
++                    "--serve",
++                    "--catalog",
++                    str(quick_catalog),
++                    "--m2m100-catalog",
++                    str(m2m100_catalog),
++                    "--m2m100",
++                    "--models",
++                    str(models),
++                    "--port",
++                    "0",
++                    "--token",
++                    token,
++                    "--idle-seconds",
++                    "10",
++                ],
++                stdout=subprocess.PIPE,
++                stderr=subprocess.PIPE,
++                text=True,
++                encoding="utf-8",
++            )
++            try:
++                ready = process.stdout.readline().strip() if process.stdout else ""
++                port = int(ready.split()[1])
++                payload = {
++                    "model": "local",
++                    "messages": [
++                        {
++                            "role": "user",
++                            "content": json.dumps(
++                                {
++                                    "target_language": "en",
++                                    "words": ["猫"],
++                                    "model": "m2m100-418m-int8",
++                                },
++                                ensure_ascii=False,
++                            ),
++                        }
++                    ],
++                }
++                request = urllib.request.Request(
++                    f"http://127.0.0.1:{port}/v1/chat/completions",
++                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
++                    headers={
++                        "Authorization": f"Bearer {token}",
++                        "Content-Type": "application/json",
++                    },
++                    method="POST",
++                )
++                with self.assertRaises(urllib.error.HTTPError) as missing:
++                    urllib.request.urlopen(request, timeout=5)
++                self.assertEqual(409, missing.exception.code)
++                body = json.loads(missing.exception.read().decode("utf-8"))
++                self.assertEqual("missing-model-component", body["error"])
++            finally:
++                if process.poll() is None:
++                    process.kill()
++                    process.wait(timeout=2)
++                if process.stdout:
++                    process.stdout.close()
++                if process.stderr:
++                    process.stderr.close()
++
+     def test_catalog_rejects_unknown_dependency(self) -> None:
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+diff --git a/tests/test_rime_gloss.ps1 b/tests/test_rime_gloss.ps1
+index 5556552..1efd1c5 100644
+--- a/tests/test_rime_gloss.ps1
++++ b/tests/test_rime_gloss.ps1
+@@ -1,11 +1,14 @@
+-[CmdletBinding()]
++﻿[CmdletBinding()]
+ param(
+-  [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
++  [string]$RepositoryRoot = '',
+   [ValidateSet('x64', 'Win32')]
+   [string]$Architecture = 'x64'
+ )
+ 
+ $ErrorActionPreference = 'Stop'
++if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
++  $RepositoryRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
++}
+ $root = [IO.Path]::GetFullPath($RepositoryRoot)
+ $dataDirectory = Join-Path $root 'output\data'
+ $sessionDirectory = [IO.Path]::GetFullPath(
+@@ -42,13 +45,28 @@ Copy-Item -Path (Join-Path $dataDirectory '*') `
+ function Invoke-RimeSession {
+   param([string[]]$Commands)
+   Push-Location -LiteralPath $sessionDirectory
++  $stderrPath = Join-Path $sessionDirectory 'rime_api_console.stderr.log'
+   try {
+-    $result = @($Commands + 'exit') | & $console 2>&1 | Out-String
++    $previousErrorActionPreference = $ErrorActionPreference
++    $ErrorActionPreference = 'Continue'
++    try {
++      $result = @($Commands + 'exit') | & $console 2> $stderrPath | Out-String
++    } finally {
++      $ErrorActionPreference = $previousErrorActionPreference
++    }
++    $stderr = if (Test-Path -LiteralPath $stderrPath) {
++      [IO.File]::ReadAllText($stderrPath)
++    } else {
++      ''
++    }
+     if ($LASTEXITCODE -ne 0) {
+-      throw "rime_api_console exited with $LASTEXITCODE`n$result"
++      throw "rime_api_console exited with $LASTEXITCODE`n$result`n$stderr"
+     }
+     return $result
+   } finally {
++    if (Test-Path -LiteralPath $stderrPath) {
++      Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
++    }
+     Pop-Location
+   }
+ }
+@@ -69,11 +87,12 @@ function Assert-NotMatch {
+ 
+ $defaultText = [IO.File]::ReadAllText((Join-Path $dataDirectory 'default.yaml'))
+ $savedOptions = @(
+-  'language_input_gloss'
+-  'language_input_ai'
+-  'language_input_en'
+-  'language_input_ja'
+-  'language_input_es'
++  'language_input_gloss',
++  'language_input_ai',
++  'language_input_model_m2m100',
++  'language_input_en',
++  'language_input_ja',
++  'language_input_es',
+   'language_input_speech'
+ )
+ foreach ($option in $savedOptions) {
+@@ -92,7 +111,7 @@ $schemaCases = @(
+     Name = 'Full-pinyin'
+     Input = 'nihao'
+     NormalizedInput = 'shangtai'
+-  }
++  },
+   [pscustomobject]@{
+     Id = 'language_input_flypy'
+     Name = 'Xiaohe double-pinyin'
+@@ -105,7 +124,7 @@ $matrixCases = 0
+ 
+ foreach ($schema in $schemaCases) {
+   $activation = Invoke-RimeSession @(
+-    "select schema $($schema.Id)"
++    "select schema $($schema.Id)",
+     $schema.Input
+   )
+   Assert-Match $activation "schema: $([regex]::Escape($schema.Id)) /" `
+@@ -168,29 +187,29 @@ foreach ($schema in $schemaCases) {
+   }
+ 
+   $preservedAi = Invoke-RimeSession @(
+-    "select schema $($schema.Id)"
+-    'set option !language_input_sensitive'
+-    'set option language_input_gloss'
+-    'set option !language_input_en'
+-    'set option !language_input_es'
+-    'set option language_input_ja'
+-    'set option !language_input_ja'
+-    'set option language_input_en'
++    "select schema $($schema.Id)",
++    'set option !language_input_sensitive',
++    'set option language_input_gloss',
++    'set option !language_input_en',
++    'set option !language_input_es',
++    'set option language_input_ja',
++    'set option !language_input_ja',
++    'set option language_input_en',
+     $schema.Input
+   )
+   Assert-NotMatch $preservedAi '1\. \[你好\].*〔en·词〕' `
+     "$($schema.Name) did not preserve AI when returning from Japanese to English."
+ 
+   $normalized = Invoke-RimeSession @(
+-    "select schema $($schema.Id)"
+-    'set option !language_input_sensitive'
+-    'set option !language_input_ja'
+-    'set option !language_input_es'
+-    'set option language_input_en'
+-    'set option !language_input_ai'
+-    'set option language_input_gloss'
+-    'set option !zh_hans'
+-    'set option zh_hant'
++    "select schema $($schema.Id)",
++    'set option !language_input_sensitive',
++    'set option !language_input_ja',
++    'set option !language_input_es',
++    'set option language_input_en',
++    'set option !language_input_ai',
++    'set option language_input_gloss',
++    'set option !zh_hans',
++    'set option zh_hant',
+     $schema.NormalizedInput
+   )
+   Assert-Match $normalized '\d+\.\s+(?:\[上臺\]|上臺\s+)〔en·词〕 to rise to power' `
+@@ -198,13 +217,13 @@ foreach ($schema in $schemaCases) {
+ }
+ 
+ $sensitive = Invoke-RimeSession @(
+-  'select schema language_input_pinyin'
+-  'set option !language_input_ja'
+-  'set option !language_input_es'
+-  'set option language_input_en'
+-  'set option !language_input_ai'
+-  'set option language_input_gloss'
+-  'set option language_input_sensitive'
++  'select schema language_input_pinyin',
++  'set option !language_input_ja',
++  'set option !language_input_es',
++  'set option language_input_en',
++  'set option !language_input_ai',
++  'set option language_input_gloss',
++  'set option language_input_sensitive',
+   'nihao'
+ )
+ Assert-Match $sensitive '1\. \[你好\](\r?\n|\s*$)' 'Sensitive mode did not retain the Chinese candidate.'
+@@ -213,21 +232,37 @@ if ($sensitive.Contains('〔en·词〕')) {
+ }
+ 
+ $selection = Invoke-RimeSession @(
+-  'select schema language_input_pinyin'
+-  'set option !language_input_ja'
+-  'set option !language_input_es'
+-  'set option language_input_en'
+-  'set option !language_input_ai'
+-  'set option language_input_gloss'
+-  'nihao'
++  'select schema language_input_pinyin',
++  'set option !language_input_ja',
++  'set option !language_input_es',
++  'set option language_input_en',
++  'set option !language_input_ai',
++  'set option language_input_gloss',
++  'nihao',
+   # This test needs only the numeric commit. Sensitive mode deliberately
+   # suppresses user-dictionary learning so output/data remains installable.
+-  'set option language_input_sensitive'
++  'set option language_input_sensitive',
+   '1'
+ )
+ Assert-Match $selection 'commit: 你好' 'Number-key candidate selection did not commit the first candidate.'
+ Assert-NoSharedUserDatabase
+ 
++$modelSwitch = Invoke-RimeSession @(
++  'select schema language_input_pinyin',
++  'set option !language_input_sensitive',
++  'set option language_input_gloss',
++  'set option language_input_ai',
++  'set option language_input_model_m2m100',
++  'nihao'
++)
++Assert-Match $modelSwitch 'updated option: language_input_model_m2m100 = 1' `
++  'M2M100 model switch did not update independently.'
++Assert-Match $modelSwitch '1\. \[你好\]' `
++  'M2M100 model switch changed the candidate text.'
++Assert-NotMatch $modelSwitch '〔en·词〕' `
++  'M2M100 model switch did not remain in AI mode.'
++Assert-NoSharedUserDatabase
++
+ [pscustomobject]@{
+   Architecture = $Architecture
+   SwitchMatrixCases = $matrixCases
+@@ -238,4 +273,5 @@ Assert-NoSharedUserDatabase
+   SavedOptions = 'passed'
+   SensitiveSuppression = 'passed'
+   NumericSelection = 'passed'
++  ModelSelection = 'passed'
+ }

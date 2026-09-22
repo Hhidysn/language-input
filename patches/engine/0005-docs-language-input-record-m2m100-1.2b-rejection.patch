@@ -1,0 +1,310 @@
+From e35232a8aee9504022dbc7f5348e9268ef14413f Mon Sep 17 00:00:00 2001
+From: Hhidysn <2244320356@qq.com>
+Date: Thu, 27 Aug 2026 10:01:25 +0800
+Subject: [PATCH 05/10] docs(language-input): record m2m100 1.2b rejection
+
+---
+ language-input/model-research/CANDIDATES.md   |  62 +++++++---
+ .../m2m100-12b-screening-v1.json              | 111 ++++++++++++++++++
+ language-input/models/catalog-v1.json         |  57 +++++++--
+ 3 files changed, 203 insertions(+), 27 deletions(-)
+ create mode 100644 language-input/model-research/m2m100-12b-screening-v1.json
+
+diff --git a/language-input/model-research/CANDIDATES.md b/language-input/model-research/CANDIDATES.md
+index f3ab98d..bfdd878 100644
+--- a/language-input/model-research/CANDIDATES.md
++++ b/language-input/model-research/CANDIDATES.md
+@@ -7,7 +7,7 @@ Approved research directory:
+ 
+ ## Research boundary
+ 
+-- Cumulative network-transfer cap: 20 GiB (21,474,836,480 bytes).
++- Cumulative network-transfer cap: 22 GiB (23,622,320,128 bytes).
+ - Research-child occupancy cap: 30 GiB (32,212,254,720 bytes).
+ - Free space recorded before creation: 937,558,605,824 bytes
+   (873.17 GiB) on `F:`.
+@@ -24,19 +24,18 @@ the initial transfer estimate 6,484,643,520 bytes (6.039 GiB). The immutable
+ download inventory is also recorded in the workflow-owned
+ `provenance/research-gate-v1.json` before any weight is downloaded.
+ 
+-Current conservative accounting on 2026-08-27 is 17,500,235,468 network bytes
+-(16.298 GiB) and 16,780,898,575 bytes (15.628 GiB) of research-child
+-occupancy. This includes the later translation-specific candidates and raw
+-reviews. The next credible source artifact, official `facebook/m2m100_1.2B`
+-`pytorch_model.bin`, is 4,958,230,644 bytes. Downloading it would raise the
+-network total to 22,458,466,112 bytes (20.916 GiB), before small tokenizer and
+-configuration files, so it is not authorized by the current 20 GiB transfer
+-cap. Evaluation is paused pending an explicit increase to 22 GiB; the 30 GiB
+-occupancy cap remains sufficient.
++The user explicitly raised the transfer cap to 22 GiB on 2026-08-27. Final
++conservative accounting after the M2M100 1.2B screen is 22,458,478,318 network
++bytes and 23,004,399,474 bytes of research-child occupancy. The ledger includes
++the pinned 4,958,230,644-byte weight, 12,206 bytes of fixed-revision manifest,
++configuration and model-card data, the offline INT8 conversion, two full local
++benchmark passes and the blind-review artifacts. No additional candidate is
++queued; the network and occupancy caps remain unexceeded.
+ 
+ ## Runtime decision
+ 
+-Status: **research build validated; release integration pending**.
++Status: **research build validated; no release integration is authorized
++because no candidate passes every hard gate**.
+ 
+ The pinned runtime candidate is official `ggml-org/llama.cpp` release
+ `v0.3.0`, annotated tag target commit
+@@ -288,16 +287,43 @@ every disagreement were resolved in the route's favor, the acceptance union
+ would be only 90.0% English, 70.0% Japanese and 56.7% Spanish. The route cannot
+ reach the required Japanese/Spanish thresholds.
+ 
+-### Pending M2M100 1.2B
++### M2M100 1.2B INT8
+ 
+-The last credible model inside the final 1–2 GiB INT8 target is official
++The last credible model inside the final 1–2 GiB INT8 target was official
+ `facebook/m2m100_1.2B`, pinned at
+ `7b36184180524c1a1bbfa37f120a608046250b98`. Hugging Face identifies the model
+-as MIT and ungated. The only Transformers weight is the 4,958,230,644-byte
+-`pytorch_model.bin`, with upstream SHA256
+-`a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4`;
+-there is no safetensors alternative. It will be downloaded, converted to INT8,
+-and evaluated only after the research transfer cap is explicitly raised.
++as MIT and ungated. The 4,958,230,644-byte `pytorch_model.bin` was verified at
++SHA256
++`a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4`.
++The fixed-revision `config.json`, tokenizer configuration and model card were
++downloaded separately; four tokenizer artifacts whose upstream Git/LFS hashes
++matched the 418M snapshot were reused locally. The resulting source snapshot
++manifest has SHA256
++`6ad795ea240a92a51395a33ff273cf20d6015d97918c8e9bbb3dde7c7369ce2a`.
++
++CTranslate2 4.8.1 converted the model offline to INT8. The converted
++`model.bin` is 1,249,655,188 bytes with SHA256
++`61a68b96c0e4a10a09a1944f9e6627a8854dccf53a0127817808bb976ce94b4f`;
++the complete converted directory is 1,258,713,172 bytes. On the full
++320-source pass, English/Japanese/Spanish nine-item p95 was respectively
++1,154.82/1,574.76/809.04 ms. The largest measured peak working set was
++1,795,371,008 bytes. Ordinary valid coverage was 96.8%/100%/100%. A separate
++safety-policy pass deterministically withheld 20 instruction-, template- or
++credential-shaped sources per language before inference.
++
++The screening blind-review package has SHA256
++`17bcd50d74b825d6a5e9d357372d73b0822302f469f4b2c1a32685513964ca92`.
++It mixed the 1.2B candidate with the already measured 418M route, hid model
++identity and was independently reviewed by DeepSeek V4 Flash and GLM-5.2.
++All 180 items were covered; agreement was 92.2% and Cohen's kappa was about
++0.806. For the 1.2B candidate, the two reviewers accepted respectively
++63.3%/70.0% English, 70.0%/63.3% Japanese and 70.0%/76.7% Spanish. Even if
++every disagreement were adjudicated in the candidate's favor, the optimistic
++upper bounds would be only 73.3%/70.0%/76.7%. These are below all three
++90%/85%/85% semantic thresholds, so adjudication cannot change this screening
++result and the candidate is not advanced to the larger release-selection
++review. The compact machine-readable evidence is
++`model-research/m2m100-12b-screening-v1.json`.
+ 
+ ## Screened-out candidates
+ 
+diff --git a/language-input/model-research/m2m100-12b-screening-v1.json b/language-input/model-research/m2m100-12b-screening-v1.json
+new file mode 100644
+index 0000000..8a8d5ae
+--- /dev/null
++++ b/language-input/model-research/m2m100-12b-screening-v1.json
+@@ -0,0 +1,111 @@
++{
++  "schema_version": 1,
++  "report_state": "rejected-screening",
++  "generated_at": "2026-08-27T09:54:14+08:00",
++  "candidate": {
++    "id": "m2m100-12b-int8-b4",
++    "upstream_repository": "facebook/m2m100_1.2B",
++    "upstream_revision": "7b36184180524c1a1bbfa37f120a608046250b98",
++    "license": "MIT",
++    "source_weight_bytes": 4958230644,
++    "source_weight_sha256": "a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4",
++    "source_snapshot_manifest_sha256": "6ad795ea240a92a51395a33ff273cf20d6015d97918c8e9bbb3dde7c7369ce2a"
++  },
++  "conversion": {
++    "runtime": "CTranslate2 4.8.1",
++    "transformers": "4.57.1",
++    "torch": "2.7.1+cpu",
++    "quantization": "int8",
++    "converted_artifact_bytes": 1258713172,
++    "converted_model_bytes": 1249655188,
++    "converted_model_sha256": "61a68b96c0e4a10a09a1944f9e6627a8854dccf53a0127817808bb976ce94b4f"
++  },
++  "full_corpus_benchmark": {
++    "source_count_per_language": 320,
++    "batch_size": 9,
++    "threads": 8,
++    "beam_size": 4,
++    "languages": {
++      "en": {
++        "valid_batches": 35,
++        "batches": 36,
++        "ordinary_valid": 271,
++        "ordinary_attempts": 280,
++        "ordinary_coverage": 0.9678571428571429,
++        "warm_nine_candidate_p95_ms": 1154.8230000007607,
++        "peak_working_set_bytes": 1790865408
++      },
++      "ja": {
++        "valid_batches": 36,
++        "batches": 36,
++        "ordinary_valid": 280,
++        "ordinary_attempts": 280,
++        "ordinary_coverage": 1.0,
++        "warm_nine_candidate_p95_ms": 1574.7560999989219,
++        "peak_working_set_bytes": 1792503808
++      },
++      "es": {
++        "valid_batches": 33,
++        "batches": 36,
++        "ordinary_valid": 280,
++        "ordinary_attempts": 280,
++        "ordinary_coverage": 1.0,
++        "warm_nine_candidate_p95_ms": 809.0400000000955,
++        "peak_working_set_bytes": 1795371008
++      }
++    }
++  },
++  "deterministic_safety_screen": {
++    "policy": "suppress instruction, template, and credential-shaped sources before inference",
++    "attempted_per_language": 320,
++    "submitted_per_language": 300,
++    "suppressed_per_language": 20,
++    "suppressed_total": 60
++  },
++  "blind_semantic_screen": {
++    "purpose": "early rejection screen; a passing model would still require the full release-selection review",
++    "blind_package_sha256": "17bcd50d74b825d6a5e9d357372d73b0822302f469f4b2c1a32685513964ca92",
++    "anonymous_anchor": "m2m100-418m-int8-b4",
++    "reviewed_items_total": 180,
++    "candidate_items": 90,
++    "candidate_items_per_language": 30,
++    "reviewer_a_route": "opencode-go/deepseek-v4-flash",
++    "reviewer_b_route": "opencode-go/glm-5.2",
++    "agreement": 0.9222222222222223,
++    "cohen_kappa": 0.8061836640516845,
++    "disagreements_total": 14,
++    "languages": {
++      "en": {
++        "reviewer_a_acceptance": 0.6333333333333333,
++        "reviewer_b_acceptance": 0.7,
++        "candidate_disagreements": 4,
++        "optimistic_acceptance_upper_bound": 0.7333333333333333,
++        "required_acceptance": 0.9
++      },
++      "ja": {
++        "reviewer_a_acceptance": 0.7,
++        "reviewer_b_acceptance": 0.6333333333333333,
++        "candidate_disagreements": 2,
++        "optimistic_acceptance_upper_bound": 0.7,
++        "required_acceptance": 0.85
++      },
++      "es": {
++        "reviewer_a_acceptance": 0.7,
++        "reviewer_b_acceptance": 0.7666666666666667,
++        "candidate_disagreements": 2,
++        "optimistic_acceptance_upper_bound": 0.7666666666666667,
++        "required_acceptance": 0.85
++      }
++    },
++    "adjudication": "not required for rejection because accepting every candidate disagreement still fails every language threshold"
++  },
++  "result": {
++    "selected": false,
++    "hard_gate_failures": [
++      "semantic-en",
++      "semantic-ja",
++      "semantic-es"
++    ],
++    "selected_model_id_after_screen": null
++  }
++}
+diff --git a/language-input/models/catalog-v1.json b/language-input/models/catalog-v1.json
+index dae00e6..9125ef5 100644
+--- a/language-input/models/catalog-v1.json
++++ b/language-input/models/catalog-v1.json
+@@ -1,7 +1,7 @@
+ {
+   "schema_version": 1,
+   "catalog_state": "evaluation",
+-  "generated_at": "2026-08-27T00:00:00+08:00",
++  "generated_at": "2026-08-27T09:54:14+08:00",
+   "selected_model_id": null,
+   "runtime": {
+     "name": "llama.cpp",
+@@ -32,12 +32,12 @@
+     }
+   },
+   "research_accounting": {
+-    "network_cap_bytes": 21474836480,
+-    "network_accounted_bytes": 17500235468,
++    "network_cap_bytes": 23622320128,
++    "network_accounted_bytes": 22458478318,
+     "research_occupancy_cap_bytes": 32212254720,
+-    "research_occupancy_bytes": 16780898575,
+-    "next_candidate_projected_network_bytes": 22458466112,
+-    "next_candidate_requires_cap_confirmation": true
++    "research_occupancy_bytes": 23004399474,
++    "next_candidate_projected_network_bytes": null,
++    "next_candidate_requires_cap_confirmation": false
+   },
+   "models": [
+     {
+@@ -209,14 +209,53 @@
+       "hard_gate_failures": ["semantic-ja", "semantic-es"]
+     },
+     {
+-      "id": "m2m100-12b-int8",
+-      "state": "pending-network-cap-confirmation",
++      "id": "m2m100-12b-int8-b4",
++      "state": "failed-semantic-gate",
+       "upstream_repository": "facebook/m2m100_1.2B",
+       "upstream_revision": "7b36184180524c1a1bbfa37f120a608046250b98",
+       "source_file_name": "pytorch_model.bin",
+       "source_size_bytes": 4958230644,
+       "source_sha256": "a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4",
+-      "license": "MIT"
++      "license": "MIT",
++      "source_snapshot_manifest_sha256": "6ad795ea240a92a51395a33ff273cf20d6015d97918c8e9bbb3dde7c7369ce2a",
++      "runtime": {
++        "ctranslate2": "4.8.1",
++        "transformers": "4.57.1",
++        "torch": "2.7.1+cpu",
++        "quantization": "int8",
++        "beam_size": 4
++      },
++      "converted_artifact_bytes": 1258713172,
++      "converted_model_bytes": 1249655188,
++      "converted_model_sha256": "61a68b96c0e4a10a09a1944f9e6627a8854dccf53a0127817808bb976ce94b4f",
++      "benchmark": {
++        "corpus": "evaluation-v1",
++        "translations_attempted": 960,
++        "ordinary_valid_coverage": {
++          "en": 0.9678571428571429,
++          "ja": 1.0,
++          "es": 1.0
++        },
++        "warm_nine_candidate_p95_ms": {
++          "en": 1154.8230000007607,
++          "ja": 1574.7560999989219,
++          "es": 809.0400000000955
++        },
++        "peak_working_set_bytes": 1795371008,
++        "deterministic_safety_suppressed_per_language": 20
++      },
++      "blind_review_package_sha256": "17bcd50d74b825d6a5e9d357372d73b0822302f469f4b2c1a32685513964ca92",
++      "optimistic_semantic_upper_bound": {
++        "en": 0.7333333333333333,
++        "ja": 0.7,
++        "es": 0.7666666666666667
++      },
++      "screening_report": "language-input/model-research/m2m100-12b-screening-v1.json",
++      "hard_gate_failures": [
++        "semantic-en",
++        "semantic-ja",
++        "semantic-es"
++      ]
+     }
+   ]
+ }

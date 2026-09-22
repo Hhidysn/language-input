@@ -1,0 +1,601 @@
+From 8e87a6e8b22c7e9cbee9edc1d77e3f6d04f056f8 Mon Sep 17 00:00:00 2001
+From: Hhidysn <2244320356@qq.com>
+Date: Thu, 27 Aug 2026 19:45:09 +0800
+Subject: [PATCH 06/10] research: reject QuickMT English semantic screen
+
+---
+ language-input/model-research/CANDIDATES.md   | 33 +++++++
+ .../quickmt-zh-en-screening-v1.json           | 63 +++++++++++++
+ language-input/models/catalog-v1.json         | 47 +++++++++-
+ scripts/aggregate_semantic_reviews.py         |  4 +-
+ scripts/benchmark_translation_route.py        | 88 +++++++++++++++----
+ scripts/build_semantic_review_set.py          | 39 ++++++--
+ tests/test_model_evaluation_tools.py          | 76 ++++++++++++++++
+ 7 files changed, 321 insertions(+), 29 deletions(-)
+ create mode 100644 language-input/model-research/quickmt-zh-en-screening-v1.json
+
+diff --git a/language-input/model-research/CANDIDATES.md b/language-input/model-research/CANDIDATES.md
+index bfdd878..730d3ec 100644
+--- a/language-input/model-research/CANDIDATES.md
++++ b/language-input/model-research/CANDIDATES.md
+@@ -325,6 +325,39 @@ result and the candidate is not advanced to the larger release-selection
+ review. The compact machine-readable evidence is
+ `model-research/m2m100-12b-screening-v1.json`.
+ 
++### QuickMT target-language-package route
++
++The Gate-2 shortlist proposed `quickmt/quickmt-zh-en` as the English component
++and, only after English passed, `quickmt/quickmt-en-ja` and
++`quickmt/quickmt-en-es` as the second legs of self-contained Japanese and
++Spanish packages. The English component was pinned at
++`c27cc8024e01a047733a1e34796e2ab19d74b237` under CC BY 4.0. All seven allowed
++runtime files were downloaded individually and verified; they total
++409,706,714 bytes. The `model.bin` SHA256 is
++`e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000`,
++and the complete runtime-file manifest SHA256 is
++`a84705b1ad8bf88738df6d3978ee5e657d29fc0821e231b299b4da6764d7a16a`.
++
++The fixed 320-source English run passed the non-semantic gates with 100%
++ordinary valid coverage, a 49.62 ms warm nine-candidate p95 and a 754,483,200
++byte peak working set. Twenty instruction-, template- or credential-shaped
++sources were deterministically withheld before inference.
++
++The stop-early blind screen mixed 30 QuickMT outputs with 30 outputs from the
++already rejected M2M100 baseline. The package SHA256 is
++`ff524d5166bb1c61007ad529368a6698542b1446177dd83d54386124a75a8764`.
++DeepSeek V4 Flash and GLM-5.2 independently accepted 24/30 (80.0%) and 26/30
++(86.7%) QuickMT items. Their intersection was 24/30 and their union was 26/30,
++so even resolving every disagreement in QuickMT's favor cannot reach the
++frozen 90% English threshold. Both rejected three intentionally suppressed
++safety-shaped rows as missing and rejected `还要` → `And yet.`; they disagreed
++on `都在` → `All in.` and `传` → `Passage`.
++
++QuickMT English is therefore rejected without adjudication. In accordance with
++the approved stop-early rule, the Japanese and Spanish components were not
++downloaded and product integration did not begin. The compact evidence is in
++`model-research/quickmt-zh-en-screening-v1.json`.
++
+ ## Screened-out candidates
+ 
+ | Family | Decision | Evidence-based reason |
+diff --git a/language-input/model-research/quickmt-zh-en-screening-v1.json b/language-input/model-research/quickmt-zh-en-screening-v1.json
+new file mode 100644
+index 0000000..0affa71
+--- /dev/null
++++ b/language-input/model-research/quickmt-zh-en-screening-v1.json
+@@ -0,0 +1,63 @@
++{
++  "schema_version": 1,
++  "candidate_id": "quickmt-zh-en-c27cc802",
++  "decision": "rejected-semantic-gate-stop-early",
++  "component": {
++    "upstream_repository": "quickmt/quickmt-zh-en",
++    "upstream_revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
++    "runtime_files_bytes": 409706714,
++    "model_bin_sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
++    "runtime_manifest_sha256": "a84705b1ad8bf88738df6d3978ee5e657d29fc0821e231b299b4da6764d7a16a",
++    "license": "CC-BY-4.0"
++  },
++  "runtime": {
++    "ctranslate2": "4.8.1",
++    "sentencepiece": "0.2.1",
++    "compute_type": "int8",
++    "beam_size": 4,
++    "threads": 8
++  },
++  "benchmark": {
++    "corpus": "evaluation-v1",
++    "corpus_sha256": "c16c68e9539b5a77558a6f03d1cc61463815eb5dbeda9e08481661b9b1e9f7c5",
++    "translations_attempted": 320,
++    "translations_submitted": 300,
++    "deterministic_safety_suppressed": 20,
++    "ordinary_valid_coverage": 1.0,
++    "warm_nine_candidate_p95_ms": 49.62160000286531,
++    "peak_working_set_bytes": 754483200,
++    "summary_sha256": "c86f57f3b905b443fe0fd285477257249b0ec7168e6be654400a432641e1a534"
++  },
++  "semantic_screen": {
++    "blind_review_package_sha256": "ff524d5166bb1c61007ad529368a6698542b1446177dd83d54386124a75a8764",
++    "mixed_baseline": "m2m100-12b-en",
++    "candidate_items": 30,
++    "reviewer_a_accepted": 24,
++    "reviewer_b_accepted": 26,
++    "intersection_accepted": 24,
++    "union_accepted": 26,
++    "reviewer_a_acceptance": 0.8,
++    "reviewer_b_acceptance": 0.8666666666666667,
++    "optimistic_upper_bound": 0.8666666666666667,
++    "required_acceptance": 0.9,
++    "overall_review_agreement": 0.9166666666666666,
++    "overall_cohen_kappa": 0.7916666666666666,
++    "adjudication_required": false,
++    "adjudication_reason": "Even accepting every reviewer disagreement cannot reach the frozen English threshold."
++  },
++  "failure_summary": {
++    "both_reviewers_rejected": [
++      "three safety-suppressed instruction or credential-shaped inputs with no output",
++      "还要 translated as And yet."
++    ],
++    "reviewer_disagreements": [
++      "都在 translated as All in.",
++      "传 translated as Passage"
++    ]
++  },
++  "stop_early": {
++    "quickmt_en_ja_downloaded": false,
++    "quickmt_en_es_downloaded": false,
++    "product_integration_started": false
++  }
++}
+diff --git a/language-input/models/catalog-v1.json b/language-input/models/catalog-v1.json
+index 9125ef5..c1e05d7 100644
+--- a/language-input/models/catalog-v1.json
++++ b/language-input/models/catalog-v1.json
+@@ -1,7 +1,7 @@
+ {
+   "schema_version": 1,
+   "catalog_state": "evaluation",
+-  "generated_at": "2026-08-27T09:54:14+08:00",
++  "generated_at": "2026-08-27T19:41:48+08:00",
+   "selected_model_id": null,
+   "runtime": {
+     "name": "llama.cpp",
+@@ -32,10 +32,10 @@
+     }
+   },
+   "research_accounting": {
+-    "network_cap_bytes": 23622320128,
+-    "network_accounted_bytes": 22458478318,
++    "network_cap_bytes": 32212254720,
++    "network_accounted_bytes": 22869139657,
+     "research_occupancy_cap_bytes": 32212254720,
+-    "research_occupancy_bytes": 23004399474,
++    "research_occupancy_bytes": 23415168465,
+     "next_candidate_projected_network_bytes": null,
+     "next_candidate_requires_cap_confirmation": false
+   },
+@@ -256,6 +256,45 @@
+         "semantic-ja",
+         "semantic-es"
+       ]
++    },
++    {
++      "id": "quickmt-zh-en-c27cc802",
++      "state": "failed-semantic-gate-stop-early",
++      "upstream_repository": "quickmt/quickmt-zh-en",
++      "upstream_revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
++      "license": "CC-BY-4.0",
++      "runtime": {
++        "ctranslate2": "4.8.1",
++        "sentencepiece": "0.2.1",
++        "quantization": "int8",
++        "beam_size": 4
++      },
++      "runtime_files_bytes": 409706714,
++      "model_bin_sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
++      "runtime_manifest_sha256": "a84705b1ad8bf88738df6d3978ee5e657d29fc0821e231b299b4da6764d7a16a",
++      "benchmark": {
++        "corpus": "evaluation-v1",
++        "ordinary_valid_coverage": 1.0,
++        "warm_nine_candidate_p95_ms": 49.62160000286531,
++        "peak_working_set_bytes": 754483200,
++        "deterministic_safety_suppressed": 20
++      },
++      "blind_review_package_sha256": "ff524d5166bb1c61007ad529368a6698542b1446177dd83d54386124a75a8764",
++      "semantic_acceptance": {
++        "en_reviewer_a": 0.8,
++        "en_reviewer_b": 0.8666666666666667
++      },
++      "optimistic_semantic_upper_bound": {
++        "en": 0.8666666666666667
++      },
++      "screening_report": "language-input/model-research/quickmt-zh-en-screening-v1.json",
++      "hard_gate_failures": [
++        "semantic-en"
++      ],
++      "stop_early_not_downloaded": [
++        "quickmt-en-ja",
++        "quickmt-en-es"
++      ]
+     }
+   ]
+ }
+diff --git a/scripts/aggregate_semantic_reviews.py b/scripts/aggregate_semantic_reviews.py
+index 3e60112..30d4300 100644
+--- a/scripts/aggregate_semantic_reviews.py
++++ b/scripts/aggregate_semantic_reviews.py
+@@ -383,8 +383,8 @@ def summarize_reviews(
+         for model_id, model_row in dimensions.items():
+             languages = model_row["languages"]
+             language_pass = {
+-                language: languages[language]["acceptance"] >= threshold
+-                for language, threshold in SEMANTIC_THRESHOLDS.items()
++                language: row["acceptance"] >= SEMANTIC_THRESHOLDS[language]
++                for language, row in languages.items()
+             }
+             final_gate[model_id] = {
+                 "languages": language_pass,
+diff --git a/scripts/benchmark_translation_route.py b/scripts/benchmark_translation_route.py
+index d9d9f01..33fa1a5 100644
+--- a/scripts/benchmark_translation_route.py
++++ b/scripts/benchmark_translation_route.py
+@@ -32,7 +32,7 @@ from benchmark_local_model import (
+ ROUTE_FORMAT = "language-input-translation-route-v1"
+ PROMPT_VERSION = "translation-route-v1"
+ MAX_GLOSS_CHARACTERS = 40
+-ALLOWED_STAGE_KINDS = {"marian", "m2m100"}
++ALLOWED_STAGE_KINDS = {"marian", "m2m100", "sentencepiece"}
+ 
+ 
+ def load_route_config(path: Path) -> dict[str, object]:
+@@ -59,17 +59,28 @@ def load_route_config(path: Path) -> dict[str, object]:
+     for raw_stage in stages:
+         if not isinstance(raw_stage, dict):
+             raise ValueError("translation stage must be an object")
+-        required = {"name", "kind", "model_path", "tokenizer_model", "revision"}
++        common_required = {"name", "kind", "model_path", "revision"}
+         optional = {"source_language", "target_language"}
++        if not common_required.issubset(raw_stage):
++            raise ValueError("translation stage has unexpected or missing keys")
++        kind = raw_stage["kind"]
++        if kind not in ALLOWED_STAGE_KINDS:
++            raise ValueError(f"unsupported translation stage kind: {kind!r}")
++        tokenizer_required = (
++            {"source_tokenizer", "target_tokenizer"}
++            if kind == "sentencepiece"
++            else {"tokenizer_model"}
++        )
++        required = common_required | tokenizer_required
+         if not required.issubset(raw_stage) or not set(raw_stage).issubset(
+             required | optional
+         ):
+             raise ValueError("translation stage has unexpected or missing keys")
+-        if not all(isinstance(raw_stage[key], str) and raw_stage[key] for key in required):
++        if not all(
++            isinstance(raw_stage[key], str) and raw_stage[key] for key in required
++        ):
+             raise ValueError("translation stage contains an empty non-string field")
+         stage = {key: str(value) for key, value in raw_stage.items()}
+-        if stage["kind"] not in ALLOWED_STAGE_KINDS:
+-            raise ValueError(f"unsupported translation stage kind: {stage['kind']!r}")
+         if stage["name"] in stage_names:
+             raise ValueError(f"duplicate translation stage name: {stage['name']}")
+         stage_names.add(stage["name"])
+@@ -79,11 +90,21 @@ def load_route_config(path: Path) -> dict[str, object]:
+             ) != language:
+                 raise ValueError("m2m100 stage language codes do not match the route")
+         elif "source_language" in stage or "target_language" in stage:
+-            raise ValueError("Marian stages must not declare language-code prefixes")
++            raise ValueError(
++                "Marian and SentencePiece stages must not declare language-code prefixes"
++            )
+         model_path = Path(stage["model_path"]).resolve(strict=True)
+         if not model_path.is_dir():
+             raise ValueError(f"translation model is not a directory: {model_path}")
+         stage["model_path"] = str(model_path)
++        if stage["kind"] == "sentencepiece":
++            for key in ("source_tokenizer", "target_tokenizer"):
++                tokenizer_path = Path(stage[key]).resolve(strict=True)
++                if not tokenizer_path.is_file():
++                    raise ValueError(
++                        f"SentencePiece tokenizer is not a file: {tokenizer_path}"
++                    )
++                stage[key] = str(tokenizer_path)
+         checked_stages.append(stage)
+     return {
+         "format": ROUTE_FORMAT,
+@@ -152,20 +173,34 @@ def validate_hypotheses(
+ class CTranslate2Stage:
+     def __init__(self, config: Mapping[str, str], *, threads: int, beam_size: int) -> None:
+         import ctranslate2  # Imported lazily so repository unit tests need no ML runtime.
+-        from transformers import AutoTokenizer
+ 
+         self.name = config["name"]
+         self.kind = config["kind"]
+         self.beam_size = beam_size
+         self.source_language = config.get("source_language")
+         self.target_language = config.get("target_language")
+-        self.tokenizer = AutoTokenizer.from_pretrained(
+-            config["tokenizer_model"],
+-            revision=config["revision"],
+-            local_files_only=True,
+-        )
+-        if self.kind == "m2m100":
+-            self.tokenizer.src_lang = self.source_language
++        self.tokenizer = None
++        self.source_tokenizer = None
++        self.target_tokenizer = None
++        if self.kind == "sentencepiece":
++            import sentencepiece
++
++            self.source_tokenizer = sentencepiece.SentencePieceProcessor(
++                model_file=config["source_tokenizer"]
++            )
++            self.target_tokenizer = sentencepiece.SentencePieceProcessor(
++                model_file=config["target_tokenizer"]
++            )
++        else:
++            from transformers import AutoTokenizer
++
++            self.tokenizer = AutoTokenizer.from_pretrained(
++                config["tokenizer_model"],
++                revision=config["revision"],
++                local_files_only=True,
++            )
++            if self.kind == "m2m100":
++                self.tokenizer.src_lang = self.source_language
+         self.translator = ctranslate2.Translator(
+             config["model_path"],
+             device="cpu",
+@@ -182,12 +217,20 @@ class CTranslate2Stage:
+     ) -> list[list[str]]:
+         if num_hypotheses < 1 or num_hypotheses > self.beam_size:
+             raise ValueError("num_hypotheses must be between one and beam_size")
+-        encoded = [
+-            self.tokenizer.convert_ids_to_tokens(self.tokenizer.encode(text))
+-            for text in texts
+-        ]
++        if self.kind == "sentencepiece":
++            assert self.source_tokenizer is not None
++            encoded = [
++                self.source_tokenizer.encode(text, out_type=str) for text in texts
++            ]
++        else:
++            assert self.tokenizer is not None
++            encoded = [
++                self.tokenizer.convert_ids_to_tokens(self.tokenizer.encode(text))
++                for text in texts
++            ]
+         target_prefix = None
+         if self.kind == "m2m100":
++            assert self.tokenizer is not None
+             target_token_id = self.tokenizer.get_lang_id(self.target_language)
+             target_token = self.tokenizer.convert_ids_to_tokens(target_token_id)
+             target_prefix = [[target_token] for _ in texts]
+@@ -202,6 +245,13 @@ class CTranslate2Stage:
+             max_decoding_length=64,
+             return_scores=False,
+         )
++        if self.kind == "sentencepiece":
++            assert self.target_tokenizer is not None
++            return [
++                [self.target_tokenizer.decode(hypothesis) for hypothesis in result.hypotheses]
++                for result in results
++            ]
++        assert self.tokenizer is not None
+         return [
+             [
+                 self.tokenizer.decode(
+@@ -499,10 +549,12 @@ def main(argv: Sequence[str] | None = None) -> int:
+     )
+     try:
+         import ctranslate2
++        import sentencepiece
+         import transformers
+ 
+         summary["runtime"] = {
+             "ctranslate2": ctranslate2.__version__,
++            "sentencepiece": sentencepiece.__version__,
+             "transformers": transformers.__version__,
+         }
+     except ImportError:
+diff --git a/scripts/build_semantic_review_set.py b/scripts/build_semantic_review_set.py
+index 6669654..56e5222 100644
+--- a/scripts/build_semantic_review_set.py
++++ b/scripts/build_semantic_review_set.py
+@@ -104,12 +104,20 @@ def load_model_outputs(
+     *,
+     model_id: str,
+     corpus_texts: set[str],
++    languages: Sequence[str] = LANGUAGES,
+ ) -> dict[tuple[str, str], str | None]:
+     if not model_id or any(character.isspace() for character in model_id):
+         raise ValueError(f"invalid model id: {model_id!r}")
+     shards = [(path, model_id)] if isinstance(path, Path) else list(path)
+     if not shards:
+         raise ValueError(f"model {model_id!r} has no benchmark shards")
++    checked_languages = tuple(languages)
++    if (
++        not checked_languages
++        or len(set(checked_languages)) != len(checked_languages)
++        or any(language not in LANGUAGES for language in checked_languages)
++    ):
++        raise ValueError(f"invalid semantic-review languages: {checked_languages!r}")
+     results: dict[tuple[str, str], str | None] = {}
+     for shard_path, raw_model_id in shards:
+         if not raw_model_id or any(character.isspace() for character in raw_model_id):
+@@ -132,7 +140,7 @@ def load_model_outputs(
+                 language = record.get("language")
+                 requested = record.get("requested")
+                 outputs = record.get("outputs")
+-                if language not in LANGUAGES:
++                if language not in checked_languages:
+                     raise ValueError(f"wrong language at {shard_path}:{line_number}")
+                 if (
+                     not isinstance(requested, list)
+@@ -158,7 +166,9 @@ def load_model_outputs(
+                     if key in results:
+                         raise ValueError(f"duplicate benchmark attempt for {key!r}")
+                     results[key] = outputs.get(word)
+-    expected = {(language, text) for language in LANGUAGES for text in corpus_texts}
++    expected = {
++        (language, text) for language in checked_languages for text in corpus_texts
++    }
+     missing = expected - set(results)
+     extra = set(results) - expected
+     if missing or extra:
+@@ -197,17 +207,25 @@ def build_review_documents(
+     *,
+     per_category: int = DEFAULT_PER_CATEGORY,
+     seed: int = DEFAULT_SEED,
++    languages: Sequence[str] = LANGUAGES,
+ ) -> tuple[dict[str, object], dict[str, object]]:
+     model_ids = sorted(outputs_by_model)
+     if len(model_ids) < 2:
+         raise ValueError("semantic review requires at least two model candidates")
++    checked_languages = tuple(languages)
++    if (
++        not checked_languages
++        or len(set(checked_languages)) != len(checked_languages)
++        or any(language not in LANGUAGES for language in checked_languages)
++    ):
++        raise ValueError(f"invalid semantic-review languages: {checked_languages!r}")
+     selected = select_sources(entries, per_category=per_category, seed=seed)
+     internal_items: list[dict[str, object]] = []
+     for row in selected:
+         source_id = str(row["id"])
+         text = str(row["text"])
+         category = str(row["category"])
+-        for language in LANGUAGES:
++        for language in checked_languages:
+             for model_id in model_ids:
+                 model_outputs = outputs_by_model[model_id]
+                 key = (language, text)
+@@ -253,7 +271,9 @@ def build_review_documents(
+                 "language": str(item["language"]),
+             }
+         )
+-    expected_items = len(model_ids) * len(LANGUAGES) * len(CATEGORIES) * per_category
++    expected_items = (
++        len(model_ids) * len(checked_languages) * len(CATEGORIES) * per_category
++    )
+     if len(review_items) != expected_items:
+         raise AssertionError(f"built {len(review_items)} review items, expected {expected_items}")
+     counts = Counter(
+@@ -264,12 +284,13 @@ def build_review_documents(
+         "format": REVIEW_FORMAT,
+         "seed": seed,
+         "model_count": len(model_ids),
++        "languages": list(checked_languages),
+         "sample_per_category": per_category,
+         "item_count": len(review_items),
+         "stratum_counts": {
+             f"{category}:{language}": counts[(category, language)]
+             for category in CATEGORIES
+-            for language in LANGUAGES
++            for language in checked_languages
+         },
+         "rubric": RUBRIC,
+         "items": review_items,
+@@ -331,6 +352,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+     parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
+     parser.add_argument("--per-category", type=int, default=DEFAULT_PER_CATEGORY)
+     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
++    parser.add_argument(
++        "--languages",
++        nargs="+",
++        choices=LANGUAGES,
++        default=list(LANGUAGES),
++    )
+     return parser.parse_args(argv)
+ 
+ 
+@@ -352,12 +379,14 @@ def main(argv: Sequence[str] | None = None) -> int:
+             shards,
+             model_id=model_id,
+             corpus_texts=corpus_texts,
++            languages=args.languages,
+         )
+     package, key = build_review_documents(
+         entries,
+         outputs_by_model,
+         per_category=args.per_category,
+         seed=args.seed,
++        languages=args.languages,
+     )
+     atomic_write_json(args.review_output, package)
+     atomic_write_json(args.key_output, key)
+diff --git a/tests/test_model_evaluation_tools.py b/tests/test_model_evaluation_tools.py
+index 1000cc2..24c46b3 100644
+--- a/tests/test_model_evaluation_tools.py
++++ b/tests/test_model_evaluation_tools.py
+@@ -574,6 +574,41 @@ class TranslationRouteBenchmarkTests(unittest.TestCase):
+             with self.assertRaisesRegex(ValueError, "language codes"):
+                 load_route_config(route_path)
+ 
++    def test_route_loader_resolves_sentencepiece_tokenizers(self) -> None:
++        with tempfile.TemporaryDirectory() as temporary:
++            root = Path(temporary)
++            model = root / "model"
++            model.mkdir()
++            source_tokenizer = model / "src.spm.model"
++            target_tokenizer = model / "tgt.spm.model"
++            source_tokenizer.write_bytes(b"source")
++            target_tokenizer.write_bytes(b"target")
++            route = {
++                "format": ROUTE_FORMAT,
++                "route_id": "quickmt-zh-en",
++                "language": "en",
++                "stages": [
++                    {
++                        "name": "zh-en",
++                        "kind": "sentencepiece",
++                        "model_path": str(model),
++                        "source_tokenizer": str(source_tokenizer),
++                        "target_tokenizer": str(target_tokenizer),
++                        "revision": "deadbeef",
++                    }
++                ],
++            }
++            route_path = root / "route.json"
++            route_path.write_text(json.dumps(route), encoding="utf-8")
++            checked = load_route_config(route_path)
++            stage = checked["stages"][0]
++            self.assertEqual(str(source_tokenizer.resolve()), stage["source_tokenizer"])
++            self.assertEqual(str(target_tokenizer.resolve()), stage["target_tokenizer"])
++            route["stages"][0]["source_language"] = "zh"
++            route_path.write_text(json.dumps(route), encoding="utf-8")
++            with self.assertRaisesRegex(ValueError, "must not declare"):
++                load_route_config(route_path)
++
+ 
+ class SemanticReviewBuilderTests(unittest.TestCase):
+     @staticmethod
+@@ -696,6 +731,47 @@ class SemanticReviewBuilderTests(unittest.TestCase):
+         self.assertEqual(len(LANGUAGES) * len(texts), len(loaded))
+         self.assertEqual("ja-长尾", loaded[("ja", "长尾")])
+ 
++    def test_semantic_builder_supports_a_single_language_stop_early_screen(self) -> None:
++        entries = self.entries()
++        outputs = {
++            model_id: {
++                ("en", row["text"]): f"output-{number}-en-{row['id']}"
++                for row in entries
++            }
++            for number, model_id in enumerate(("model-alpha", "model-beta"), start=1)
++        }
++        package, key = build_review_documents(
++            entries,
++            outputs,
++            per_category=1,
++            seed=11,
++            languages=("en",),
++        )
++        self.assertEqual(["en"], package["languages"])
++        self.assertEqual(10, package["item_count"])
++        items_by_id, mapping_by_id = validate_package_and_key(package, key)
++        reviews = {
++            review_id: {
++                "review_id": review_id,
++                "accept": True,
++                "issue": "ok",
++                "note": "",
++            }
++            for review_id in items_by_id
++        }
++        summary = summarize_reviews(
++            package,
++            items_by_id,
++            mapping_by_id,
++            reviews,
++            reviews,
++            adjudication={},
++        )
++        self.assertEqual(
++            {"en": True},
++            summary["semantic_gate"]["model-alpha"]["languages"],
++        )
++
+     def test_reviewer_event_parser_and_contract_validation(self) -> None:
+         response = {
+             "reviewer": "A",
