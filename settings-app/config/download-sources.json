@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "base_url": "https://huggingface.co",
+  "url_template": "{base_url}/{repository}/resolve/{revision}/{path}?download=true",
+  "allow_http": false,
+  "use_system_proxy": false,
+  "mirrors": [],
+  "components": {}
+}

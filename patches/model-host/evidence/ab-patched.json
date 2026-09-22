@@ -1,0 +1,75 @@
+{
+  "name": "patched",
+  "exe": "F:\\documents\\software\\langInput\\patches\\model-host\\dist\\LanguageInputModelHost\\LanguageInputModelHost.exe",
+  "port": 51235,
+  "startup_s": 1.517472400002589,
+  "health_first_s": 0.006429000000935048,
+  "health_samples_s": [
+    0.018393899998045526,
+    0.006178899999213172,
+    0.005132800000865245,
+    0.005579699998634169,
+    0.005104400002892362
+  ],
+  "zh_en_first_s": 1.636028199998691,
+  "warm_samples_s": [
+    0.0292687000001024,
+    0.02711079999789945,
+    0.027033900001697475,
+    0.02784569999857922,
+    0.02534409999861964
+  ],
+  "responses": {
+    "zh-en": {
+      "status": 200,
+      "json": {
+        "id": "language-input-local",
+        "object": "chat.completion",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"打字\":\"Typing; Typography\",\"搭子\":\"Hitches; Hittite\",\"大\":\"Big; The Big\"}"
+            }
+          }
+        ]
+      }
+    },
+    "zh-ja": {
+      "status": 200,
+      "json": {
+        "id": "language-input-local",
+        "object": "chat.completion",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"打字\":\"タイピング; 入力\",\"搭子\":\"ヒッチハイク; ヒッチコック\",\"大\":\"ビッグ\"}"
+            }
+          }
+        ]
+      }
+    },
+    "zh-es": {
+      "status": 200,
+      "json": {
+        "id": "language-input-local",
+        "object": "chat.completion",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"打字\":\"Tipificación; Tirando\",\"搭子\":\"Hitches; Hittches\",\"大\":\"Grande; Gran grande\"}"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "health_running": true,
+  "exit_code": 1,
+  "port_still_open": false
+}

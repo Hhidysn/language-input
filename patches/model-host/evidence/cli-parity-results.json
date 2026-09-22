@@ -1,0 +1,635 @@
+{
+  "list": {
+    "current": {
+      "exit": 0,
+      "stdout": "{\"quickmt-en-es\": {\"component_id\": \"quickmt-en-es\", \"format\": \"language-input-installed-component-v1\", \"manifest\": {\"component_id\": \"quickmt-en-es\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"d85aa535a3688a8605806e7dd3b88f3c0b4dfebd9aa1fd8db12a8bb8b3d733d6\", \"size\": 4607}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"a609e71626f9629e7d8cbf76f0961b32f87268e1e4e9548c3ef2de061dece10e\", \"size\": 401699775}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"b75f147e85a45a5eefa2d216e902e7f56631a5529a2eecf2542fc1f90592c5e8\", \"size\": 341401}, {\"path\": \"model/src.spm.model\", \"sha256\": \"c26488c6db0bdca05f0e9e8edf43e8bdb4f78fc5c41c51749f88aefa6a1d030b\", \"size\": 593820}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"e3e561180d2c23b2d4b5453ad4785ac15bae4a5dba047dcf468dce7c09debce7\", \"size\": 362373}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"515603821dd149cb66b99febbe4bbb05b9c7819943621d1f66c28ca2270a47e9\", \"size\": 603700}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"es\"], \"repository\": \"quickmt/quickmt-en-es\", \"requires\": [\"quickmt-zh-en\"], \"revision\": \"430b78899a30bf5a867dffd407c64b028bbaebf4\", \"runtime_bytes\": 403605899}, \"pack_sha256\": \"561c1434de457aad9e750ec79b99a1ef6991fcf6a8ab96aa6181afad18a9a0b2\", \"pack_size\": 403609399}, \"quickmt-en-ja\": {\"component_id\": \"quickmt-en-ja\", \"format\": \"language-input-installed-component-v1\", \"manifest\": {\"component_id\": \"quickmt-en-ja\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"62f2f6c53c4c27332f4cdbab14db4e64ff0b5afe18bb271b261ef7ca24ad74df\", \"size\": 4498}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"a2653ed557273846433473e87bc35e482d956dd529be02faafc0ab9597816585\", \"size\": 401699775}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"b896ae8632a0ebb369c5982658c3bd94eefa01e4574ccd659d87272498bbe743\", \"size\": 332239}, {\"path\": \"model/src.spm.model\", \"sha256\": \"01dc857df9df5987bec61812d1fbc2e78ad530346c09fe3ffaf27184358ab8fd\", \"size\": 583983}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"b130ef6213111d052be24288d6a0ac1eecf2b0bbe54cc4f7d63b56d2bd57c334\", \"size\": 435375}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"cbd449d7e92d850f6d36efeafb40cea3a8468f55db0ca751ee4ece0ceb70d19b\", \"size\": 583133}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"ja\"], \"repository\": \"quickmt/quickmt-en-ja\", \"requires\": [\"quickmt-zh-en\"], \"revision\": \"c09e98b8438a239a8210060114cea19c426c0559\", \"runtime_bytes\": 403639226}, \"pack_sha256\": \"e08181424a18a1f85b35f7e51a1e84dc78ece081bf2df31c9958d4a4036bba67\", \"pack_size\": 403642726}, \"quickmt-zh-en\": {\"component_id\": \"quickmt-zh-en\", \"format\": \"language-input-installed-component-v1\", \"manifest\": {\"component_id\": \"quickmt-zh-en\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc\", \"size\": 5321}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000\", \"size\": 407101843}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522\", \"size\": 554957}, {\"path\": \"model/src.spm.model\", \"sha256\": \"56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb\", \"size\": 720056}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3\", \"size\": 532214}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823\", \"size\": 792100}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"en\"], \"repository\": \"quickmt/quickmt-zh-en\", \"requires\": [], \"revision\": \"c27cc8024e01a047733a1e34796e2ab19d74b237\", \"runtime_bytes\": 409706714}, \"pack_sha256\": \"fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7\", \"pack_size\": 409710191}}",
+      "stderr": "",
+      "parsed": {
+        "quickmt-en-es": {
+          "component_id": "quickmt-en-es",
+          "format": "language-input-installed-component-v1",
+          "manifest": {
+            "component_id": "quickmt-en-es",
+            "files": [
+              {
+                "path": "model/README.md",
+                "sha256": "d85aa535a3688a8605806e7dd3b88f3c0b4dfebd9aa1fd8db12a8bb8b3d733d6",
+                "size": 4607
+              },
+              {
+                "path": "model/config.json",
+                "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+                "size": 223
+              },
+              {
+                "path": "model/model.bin",
+                "sha256": "a609e71626f9629e7d8cbf76f0961b32f87268e1e4e9548c3ef2de061dece10e",
+                "size": 401699775
+              },
+              {
+                "path": "model/source_vocabulary.json",
+                "sha256": "b75f147e85a45a5eefa2d216e902e7f56631a5529a2eecf2542fc1f90592c5e8",
+                "size": 341401
+              },
+              {
+                "path": "model/src.spm.model",
+                "sha256": "c26488c6db0bdca05f0e9e8edf43e8bdb4f78fc5c41c51749f88aefa6a1d030b",
+                "size": 593820
+              },
+              {
+                "path": "model/target_vocabulary.json",
+                "sha256": "e3e561180d2c23b2d4b5453ad4785ac15bae4a5dba047dcf468dce7c09debce7",
+                "size": 362373
+              },
+              {
+                "path": "model/tgt.spm.model",
+                "sha256": "515603821dd149cb66b99febbe4bbb05b9c7819943621d1f66c28ca2270a47e9",
+                "size": 603700
+              }
+            ],
+            "format": "language-input-model-pack-v1",
+            "license": "CC-BY-4.0",
+            "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+            "provides": [
+              "es"
+            ],
+            "repository": "quickmt/quickmt-en-es",
+            "requires": [
+              "quickmt-zh-en"
+            ],
+            "revision": "430b78899a30bf5a867dffd407c64b028bbaebf4",
+            "runtime_bytes": 403605899
+          },
+          "pack_sha256": "561c1434de457aad9e750ec79b99a1ef6991fcf6a8ab96aa6181afad18a9a0b2",
+          "pack_size": 403609399
+        },
+        "quickmt-en-ja": {
+          "component_id": "quickmt-en-ja",
+          "format": "language-input-installed-component-v1",
+          "manifest": {
+            "component_id": "quickmt-en-ja",
+            "files": [
+              {
+                "path": "model/README.md",
+                "sha256": "62f2f6c53c4c27332f4cdbab14db4e64ff0b5afe18bb271b261ef7ca24ad74df",
+                "size": 4498
+              },
+              {
+                "path": "model/config.json",
+                "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+                "size": 223
+              },
+              {
+                "path": "model/model.bin",
+                "sha256": "a2653ed557273846433473e87bc35e482d956dd529be02faafc0ab9597816585",
+                "size": 401699775
+              },
+              {
+                "path": "model/source_vocabulary.json",
+                "sha256": "b896ae8632a0ebb369c5982658c3bd94eefa01e4574ccd659d87272498bbe743",
+                "size": 332239
+              },
+              {
+                "path": "model/src.spm.model",
+                "sha256": "01dc857df9df5987bec61812d1fbc2e78ad530346c09fe3ffaf27184358ab8fd",
+                "size": 583983
+              },
+              {
+                "path": "model/target_vocabulary.json",
+                "sha256": "b130ef6213111d052be24288d6a0ac1eecf2b0bbe54cc4f7d63b56d2bd57c334",
+                "size": 435375
+              },
+              {
+                "path": "model/tgt.spm.model",
+                "sha256": "cbd449d7e92d850f6d36efeafb40cea3a8468f55db0ca751ee4ece0ceb70d19b",
+                "size": 583133
+              }
+            ],
+            "format": "language-input-model-pack-v1",
+            "license": "CC-BY-4.0",
+            "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+            "provides": [
+              "ja"
+            ],
+            "repository": "quickmt/quickmt-en-ja",
+            "requires": [
+              "quickmt-zh-en"
+            ],
+            "revision": "c09e98b8438a239a8210060114cea19c426c0559",
+            "runtime_bytes": 403639226
+          },
+          "pack_sha256": "e08181424a18a1f85b35f7e51a1e84dc78ece081bf2df31c9958d4a4036bba67",
+          "pack_size": 403642726
+        },
+        "quickmt-zh-en": {
+          "component_id": "quickmt-zh-en",
+          "format": "language-input-installed-component-v1",
+          "manifest": {
+            "component_id": "quickmt-zh-en",
+            "files": [
+              {
+                "path": "model/README.md",
+                "sha256": "39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc",
+                "size": 5321
+              },
+              {
+                "path": "model/config.json",
+                "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+                "size": 223
+              },
+              {
+                "path": "model/model.bin",
+                "sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+                "size": 407101843
+              },
+              {
+                "path": "model/source_vocabulary.json",
+                "sha256": "f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522",
+                "size": 554957
+              },
+              {
+                "path": "model/src.spm.model",
+                "sha256": "56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb",
+                "size": 720056
+              },
+              {
+                "path": "model/target_vocabulary.json",
+                "sha256": "578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3",
+                "size": 532214
+              },
+              {
+                "path": "model/tgt.spm.model",
+                "sha256": "c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823",
+                "size": 792100
+              }
+            ],
+            "format": "language-input-model-pack-v1",
+            "license": "CC-BY-4.0",
+            "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+            "provides": [
+              "en"
+            ],
+            "repository": "quickmt/quickmt-zh-en",
+            "requires": [],
+            "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+            "runtime_bytes": 409706714
+          },
+          "pack_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+          "pack_size": 409710191
+        }
+      }
+    },
+    "patched": {
+      "exit": 0,
+      "stdout": "{\"quickmt-en-es\": {\"component_id\": \"quickmt-en-es\", \"format\": \"language-input-installed-component-v1\", \"manifest\": {\"component_id\": \"quickmt-en-es\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"d85aa535a3688a8605806e7dd3b88f3c0b4dfebd9aa1fd8db12a8bb8b3d733d6\", \"size\": 4607}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"a609e71626f9629e7d8cbf76f0961b32f87268e1e4e9548c3ef2de061dece10e\", \"size\": 401699775}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"b75f147e85a45a5eefa2d216e902e7f56631a5529a2eecf2542fc1f90592c5e8\", \"size\": 341401}, {\"path\": \"model/src.spm.model\", \"sha256\": \"c26488c6db0bdca05f0e9e8edf43e8bdb4f78fc5c41c51749f88aefa6a1d030b\", \"size\": 593820}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"e3e561180d2c23b2d4b5453ad4785ac15bae4a5dba047dcf468dce7c09debce7\", \"size\": 362373}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"515603821dd149cb66b99febbe4bbb05b9c7819943621d1f66c28ca2270a47e9\", \"size\": 603700}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"es\"], \"repository\": \"quickmt/quickmt-en-es\", \"requires\": [\"quickmt-zh-en\"], \"revision\": \"430b78899a30bf5a867dffd407c64b028bbaebf4\", \"runtime_bytes\": 403605899}, \"pack_sha256\": \"561c1434de457aad9e750ec79b99a1ef6991fcf6a8ab96aa6181afad18a9a0b2\", \"pack_size\": 403609399}, \"quickmt-en-ja\": {\"component_id\": \"quickmt-en-ja\", \"format\": \"language-input-installed-component-v1\", \"manifest\": {\"component_id\": \"quickmt-en-ja\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"62f2f6c53c4c27332f4cdbab14db4e64ff0b5afe18bb271b261ef7ca24ad74df\", \"size\": 4498}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"a2653ed557273846433473e87bc35e482d956dd529be02faafc0ab9597816585\", \"size\": 401699775}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"b896ae8632a0ebb369c5982658c3bd94eefa01e4574ccd659d87272498bbe743\", \"size\": 332239}, {\"path\": \"model/src.spm.model\", \"sha256\": \"01dc857df9df5987bec61812d1fbc2e78ad530346c09fe3ffaf27184358ab8fd\", \"size\": 583983}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"b130ef6213111d052be24288d6a0ac1eecf2b0bbe54cc4f7d63b56d2bd57c334\", \"size\": 435375}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"cbd449d7e92d850f6d36efeafb40cea3a8468f55db0ca751ee4ece0ceb70d19b\", \"size\": 583133}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"ja\"], \"repository\": \"quickmt/quickmt-en-ja\", \"requires\": [\"quickmt-zh-en\"], \"revision\": \"c09e98b8438a239a8210060114cea19c426c0559\", \"runtime_bytes\": 403639226}, \"pack_sha256\": \"e08181424a18a1f85b35f7e51a1e84dc78ece081bf2df31c9958d4a4036bba67\", \"pack_size\": 403642726}, \"quickmt-zh-en\": {\"component_id\": \"quickmt-zh-en\", \"format\": \"language-input-installed-component-v1\", \"manifest\": {\"component_id\": \"quickmt-zh-en\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc\", \"size\": 5321}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000\", \"size\": 407101843}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522\", \"size\": 554957}, {\"path\": \"model/src.spm.model\", \"sha256\": \"56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb\", \"size\": 720056}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3\", \"size\": 532214}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823\", \"size\": 792100}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"en\"], \"repository\": \"quickmt/quickmt-zh-en\", \"requires\": [], \"revision\": \"c27cc8024e01a047733a1e34796e2ab19d74b237\", \"runtime_bytes\": 409706714}, \"pack_sha256\": \"fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7\", \"pack_size\": 409710191}}",
+      "stderr": "",
+      "parsed": {
+        "quickmt-en-es": {
+          "component_id": "quickmt-en-es",
+          "format": "language-input-installed-component-v1",
+          "manifest": {
+            "component_id": "quickmt-en-es",
+            "files": [
+              {
+                "path": "model/README.md",
+                "sha256": "d85aa535a3688a8605806e7dd3b88f3c0b4dfebd9aa1fd8db12a8bb8b3d733d6",
+                "size": 4607
+              },
+              {
+                "path": "model/config.json",
+                "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+                "size": 223
+              },
+              {
+                "path": "model/model.bin",
+                "sha256": "a609e71626f9629e7d8cbf76f0961b32f87268e1e4e9548c3ef2de061dece10e",
+                "size": 401699775
+              },
+              {
+                "path": "model/source_vocabulary.json",
+                "sha256": "b75f147e85a45a5eefa2d216e902e7f56631a5529a2eecf2542fc1f90592c5e8",
+                "size": 341401
+              },
+              {
+                "path": "model/src.spm.model",
+                "sha256": "c26488c6db0bdca05f0e9e8edf43e8bdb4f78fc5c41c51749f88aefa6a1d030b",
+                "size": 593820
+              },
+              {
+                "path": "model/target_vocabulary.json",
+                "sha256": "e3e561180d2c23b2d4b5453ad4785ac15bae4a5dba047dcf468dce7c09debce7",
+                "size": 362373
+              },
+              {
+                "path": "model/tgt.spm.model",
+                "sha256": "515603821dd149cb66b99febbe4bbb05b9c7819943621d1f66c28ca2270a47e9",
+                "size": 603700
+              }
+            ],
+            "format": "language-input-model-pack-v1",
+            "license": "CC-BY-4.0",
+            "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+            "provides": [
+              "es"
+            ],
+            "repository": "quickmt/quickmt-en-es",
+            "requires": [
+              "quickmt-zh-en"
+            ],
+            "revision": "430b78899a30bf5a867dffd407c64b028bbaebf4",
+            "runtime_bytes": 403605899
+          },
+          "pack_sha256": "561c1434de457aad9e750ec79b99a1ef6991fcf6a8ab96aa6181afad18a9a0b2",
+          "pack_size": 403609399
+        },
+        "quickmt-en-ja": {
+          "component_id": "quickmt-en-ja",
+          "format": "language-input-installed-component-v1",
+          "manifest": {
+            "component_id": "quickmt-en-ja",
+            "files": [
+              {
+                "path": "model/README.md",
+                "sha256": "62f2f6c53c4c27332f4cdbab14db4e64ff0b5afe18bb271b261ef7ca24ad74df",
+                "size": 4498
+              },
+              {
+                "path": "model/config.json",
+                "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+                "size": 223
+              },
+              {
+                "path": "model/model.bin",
+                "sha256": "a2653ed557273846433473e87bc35e482d956dd529be02faafc0ab9597816585",
+                "size": 401699775
+              },
+              {
+                "path": "model/source_vocabulary.json",
+                "sha256": "b896ae8632a0ebb369c5982658c3bd94eefa01e4574ccd659d87272498bbe743",
+                "size": 332239
+              },
+              {
+                "path": "model/src.spm.model",
+                "sha256": "01dc857df9df5987bec61812d1fbc2e78ad530346c09fe3ffaf27184358ab8fd",
+                "size": 583983
+              },
+              {
+                "path": "model/target_vocabulary.json",
+                "sha256": "b130ef6213111d052be24288d6a0ac1eecf2b0bbe54cc4f7d63b56d2bd57c334",
+                "size": 435375
+              },
+              {
+                "path": "model/tgt.spm.model",
+                "sha256": "cbd449d7e92d850f6d36efeafb40cea3a8468f55db0ca751ee4ece0ceb70d19b",
+                "size": 583133
+              }
+            ],
+            "format": "language-input-model-pack-v1",
+            "license": "CC-BY-4.0",
+            "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+            "provides": [
+              "ja"
+            ],
+            "repository": "quickmt/quickmt-en-ja",
+            "requires": [
+              "quickmt-zh-en"
+            ],
+            "revision": "c09e98b8438a239a8210060114cea19c426c0559",
+            "runtime_bytes": 403639226
+          },
+          "pack_sha256": "e08181424a18a1f85b35f7e51a1e84dc78ece081bf2df31c9958d4a4036bba67",
+          "pack_size": 403642726
+        },
+        "quickmt-zh-en": {
+          "component_id": "quickmt-zh-en",
+          "format": "language-input-installed-component-v1",
+          "manifest": {
+            "component_id": "quickmt-zh-en",
+            "files": [
+              {
+                "path": "model/README.md",
+                "sha256": "39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc",
+                "size": 5321
+              },
+              {
+                "path": "model/config.json",
+                "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+                "size": 223
+              },
+              {
+                "path": "model/model.bin",
+                "sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+                "size": 407101843
+              },
+              {
+                "path": "model/source_vocabulary.json",
+                "sha256": "f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522",
+                "size": 554957
+              },
+              {
+                "path": "model/src.spm.model",
+                "sha256": "56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb",
+                "size": 720056
+              },
+              {
+                "path": "model/target_vocabulary.json",
+                "sha256": "578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3",
+                "size": 532214
+              },
+              {
+                "path": "model/tgt.spm.model",
+                "sha256": "c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823",
+                "size": 792100
+              }
+            ],
+            "format": "language-input-model-pack-v1",
+            "license": "CC-BY-4.0",
+            "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+            "provides": [
+              "en"
+            ],
+            "repository": "quickmt/quickmt-zh-en",
+            "requires": [],
+            "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+            "runtime_bytes": 409706714
+          },
+          "pack_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+          "pack_size": 409710191
+        }
+      }
+    }
+  },
+  "audit": {
+    "current": {
+      "exit": 0,
+      "stdout": "{\"component\": {\"display_name\": \"Ӣ�� AI ���������\", \"file_name\": \"quickmt-zh-en-c27cc802.limodel\", \"file_sha256\": \"fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7\", \"file_size\": 409710191, \"id\": \"quickmt-zh-en\", \"license\": \"CC-BY-4.0\", \"provides\": [\"en\"], \"requires\": [], \"revision\": \"c27cc8024e01a047733a1e34796e2ab19d74b237\"}, \"manifest\": {\"component_id\": \"quickmt-zh-en\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc\", \"size\": 5321}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000\", \"size\": 407101843}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522\", \"size\": 554957}, {\"path\": \"model/src.spm.model\", \"sha256\": \"56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb\", \"size\": 720056}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3\", \"size\": 532214}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823\", \"size\": 792100}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"en\"], \"repository\": \"quickmt/quickmt-zh-en\", \"requires\": [], \"revision\": \"c27cc8024e01a047733a1e34796e2ab19d74b237\", \"runtime_bytes\": 409706714}, \"pack_path\": \"F:\\\\documents\\\\.i-wish-research\\\\language-input-ai-models-20260826\\\\artifacts\\\\quickmt-limodel-v2\\\\quickmt-zh-en-c27cc802.limodel\", \"pack_sha256\": \"fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7\", \"pack_size\": 409710191}",
+      "stderr": "",
+      "parsed": {
+        "component": {
+          "display_name": "Ӣ�� AI ���������",
+          "file_name": "quickmt-zh-en-c27cc802.limodel",
+          "file_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+          "file_size": 409710191,
+          "id": "quickmt-zh-en",
+          "license": "CC-BY-4.0",
+          "provides": [
+            "en"
+          ],
+          "requires": [],
+          "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237"
+        },
+        "manifest": {
+          "component_id": "quickmt-zh-en",
+          "files": [
+            {
+              "path": "model/README.md",
+              "sha256": "39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc",
+              "size": 5321
+            },
+            {
+              "path": "model/config.json",
+              "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+              "size": 223
+            },
+            {
+              "path": "model/model.bin",
+              "sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+              "size": 407101843
+            },
+            {
+              "path": "model/source_vocabulary.json",
+              "sha256": "f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522",
+              "size": 554957
+            },
+            {
+              "path": "model/src.spm.model",
+              "sha256": "56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb",
+              "size": 720056
+            },
+            {
+              "path": "model/target_vocabulary.json",
+              "sha256": "578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3",
+              "size": 532214
+            },
+            {
+              "path": "model/tgt.spm.model",
+              "sha256": "c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823",
+              "size": 792100
+            }
+          ],
+          "format": "language-input-model-pack-v1",
+          "license": "CC-BY-4.0",
+          "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+          "provides": [
+            "en"
+          ],
+          "repository": "quickmt/quickmt-zh-en",
+          "requires": [],
+          "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+          "runtime_bytes": 409706714
+        },
+        "pack_path": "F:\\documents\\.i-wish-research\\language-input-ai-models-20260826\\artifacts\\quickmt-limodel-v2\\quickmt-zh-en-c27cc802.limodel",
+        "pack_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+        "pack_size": 409710191
+      }
+    },
+    "patched": {
+      "exit": 0,
+      "stdout": "{\"component\": {\"display_name\": \"Ӣ�� AI ���������\", \"file_name\": \"quickmt-zh-en-c27cc802.limodel\", \"file_sha256\": \"fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7\", \"file_size\": 409710191, \"id\": \"quickmt-zh-en\", \"license\": \"CC-BY-4.0\", \"provides\": [\"en\"], \"requires\": [], \"revision\": \"c27cc8024e01a047733a1e34796e2ab19d74b237\"}, \"manifest\": {\"component_id\": \"quickmt-zh-en\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc\", \"size\": 5321}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000\", \"size\": 407101843}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522\", \"size\": 554957}, {\"path\": \"model/src.spm.model\", \"sha256\": \"56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb\", \"size\": 720056}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3\", \"size\": 532214}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823\", \"size\": 792100}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"en\"], \"repository\": \"quickmt/quickmt-zh-en\", \"requires\": [], \"revision\": \"c27cc8024e01a047733a1e34796e2ab19d74b237\", \"runtime_bytes\": 409706714}, \"pack_path\": \"F:\\\\documents\\\\.i-wish-research\\\\language-input-ai-models-20260826\\\\artifacts\\\\quickmt-limodel-v2\\\\quickmt-zh-en-c27cc802.limodel\", \"pack_sha256\": \"fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7\", \"pack_size\": 409710191}",
+      "stderr": "",
+      "parsed": {
+        "component": {
+          "display_name": "Ӣ�� AI ���������",
+          "file_name": "quickmt-zh-en-c27cc802.limodel",
+          "file_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+          "file_size": 409710191,
+          "id": "quickmt-zh-en",
+          "license": "CC-BY-4.0",
+          "provides": [
+            "en"
+          ],
+          "requires": [],
+          "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237"
+        },
+        "manifest": {
+          "component_id": "quickmt-zh-en",
+          "files": [
+            {
+              "path": "model/README.md",
+              "sha256": "39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc",
+              "size": 5321
+            },
+            {
+              "path": "model/config.json",
+              "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+              "size": 223
+            },
+            {
+              "path": "model/model.bin",
+              "sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+              "size": 407101843
+            },
+            {
+              "path": "model/source_vocabulary.json",
+              "sha256": "f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522",
+              "size": 554957
+            },
+            {
+              "path": "model/src.spm.model",
+              "sha256": "56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb",
+              "size": 720056
+            },
+            {
+              "path": "model/target_vocabulary.json",
+              "sha256": "578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3",
+              "size": 532214
+            },
+            {
+              "path": "model/tgt.spm.model",
+              "sha256": "c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823",
+              "size": 792100
+            }
+          ],
+          "format": "language-input-model-pack-v1",
+          "license": "CC-BY-4.0",
+          "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+          "provides": [
+            "en"
+          ],
+          "repository": "quickmt/quickmt-zh-en",
+          "requires": [],
+          "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+          "runtime_bytes": 409706714
+        },
+        "pack_path": "F:\\documents\\.i-wish-research\\language-input-ai-models-20260826\\artifacts\\quickmt-limodel-v2\\quickmt-zh-en-c27cc802.limodel",
+        "pack_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+        "pack_size": 409710191
+      }
+    }
+  },
+  "import": {
+    "current": {
+      "exit": 0,
+      "stdout": "{\"component_id\": \"quickmt-zh-en\", \"format\": \"language-input-installed-component-v1\", \"manifest\": {\"component_id\": \"quickmt-zh-en\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc\", \"size\": 5321}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000\", \"size\": 407101843}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522\", \"size\": 554957}, {\"path\": \"model/src.spm.model\", \"sha256\": \"56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb\", \"size\": 720056}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3\", \"size\": 532214}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823\", \"size\": 792100}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"en\"], \"repository\": \"quickmt/quickmt-zh-en\", \"requires\": [], \"revision\": \"c27cc8024e01a047733a1e34796e2ab19d74b237\", \"runtime_bytes\": 409706714}, \"pack_sha256\": \"fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7\", \"pack_size\": 409710191}",
+      "stderr": "",
+      "parsed": {
+        "component_id": "quickmt-zh-en",
+        "format": "language-input-installed-component-v1",
+        "manifest": {
+          "component_id": "quickmt-zh-en",
+          "files": [
+            {
+              "path": "model/README.md",
+              "sha256": "39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc",
+              "size": 5321
+            },
+            {
+              "path": "model/config.json",
+              "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+              "size": 223
+            },
+            {
+              "path": "model/model.bin",
+              "sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+              "size": 407101843
+            },
+            {
+              "path": "model/source_vocabulary.json",
+              "sha256": "f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522",
+              "size": 554957
+            },
+            {
+              "path": "model/src.spm.model",
+              "sha256": "56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb",
+              "size": 720056
+            },
+            {
+              "path": "model/target_vocabulary.json",
+              "sha256": "578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3",
+              "size": 532214
+            },
+            {
+              "path": "model/tgt.spm.model",
+              "sha256": "c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823",
+              "size": 792100
+            }
+          ],
+          "format": "language-input-model-pack-v1",
+          "license": "CC-BY-4.0",
+          "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+          "provides": [
+            "en"
+          ],
+          "repository": "quickmt/quickmt-zh-en",
+          "requires": [],
+          "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+          "runtime_bytes": 409706714
+        },
+        "pack_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+        "pack_size": 409710191
+      }
+    },
+    "patched": {
+      "exit": 0,
+      "stdout": "{\"component_id\": \"quickmt-zh-en\", \"format\": \"language-input-installed-component-v1\", \"manifest\": {\"component_id\": \"quickmt-zh-en\", \"files\": [{\"path\": \"model/README.md\", \"sha256\": \"39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc\", \"size\": 5321}, {\"path\": \"model/config.json\", \"sha256\": \"66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69\", \"size\": 223}, {\"path\": \"model/model.bin\", \"sha256\": \"e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000\", \"size\": 407101843}, {\"path\": \"model/source_vocabulary.json\", \"sha256\": \"f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522\", \"size\": 554957}, {\"path\": \"model/src.spm.model\", \"sha256\": \"56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb\", \"size\": 720056}, {\"path\": \"model/target_vocabulary.json\", \"sha256\": \"578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3\", \"size\": 532214}, {\"path\": \"model/tgt.spm.model\", \"sha256\": \"c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823\", \"size\": 792100}], \"format\": \"language-input-model-pack-v1\", \"license\": \"CC-BY-4.0\", \"notice_sha256\": \"7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a\", \"provides\": [\"en\"], \"repository\": \"quickmt/quickmt-zh-en\", \"requires\": [], \"revision\": \"c27cc8024e01a047733a1e34796e2ab19d74b237\", \"runtime_bytes\": 409706714}, \"pack_sha256\": \"fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7\", \"pack_size\": 409710191}",
+      "stderr": "",
+      "parsed": {
+        "component_id": "quickmt-zh-en",
+        "format": "language-input-installed-component-v1",
+        "manifest": {
+          "component_id": "quickmt-zh-en",
+          "files": [
+            {
+              "path": "model/README.md",
+              "sha256": "39f59cf36cffa070245974275247a036efdf432cfd0a21a656dba88c53c392cc",
+              "size": 5321
+            },
+            {
+              "path": "model/config.json",
+              "sha256": "66edc5d58ceb812a41b4b784497001f815c35400884f40984b19de29e1bc3d69",
+              "size": 223
+            },
+            {
+              "path": "model/model.bin",
+              "sha256": "e7cac9c2bc585e476d8fe47af11ed76723d4b5cf69ccef8f5ff821fb3ec05000",
+              "size": 407101843
+            },
+            {
+              "path": "model/source_vocabulary.json",
+              "sha256": "f535f57bbdb306027e9ebbe8d8a41a9f9d3b9465279c903b42de7e50186ad522",
+              "size": 554957
+            },
+            {
+              "path": "model/src.spm.model",
+              "sha256": "56159dc3a8607805f0e3f2cf4c91f37ee221e91fb824ebb362622d22185872cb",
+              "size": 720056
+            },
+            {
+              "path": "model/target_vocabulary.json",
+              "sha256": "578cfc6b44f8e22a8556a19487adbc5b3935ecfaad310bc2dd79ad2b93c5b9f3",
+              "size": 532214
+            },
+            {
+              "path": "model/tgt.spm.model",
+              "sha256": "c23dc1aa66b7b98263da867137a7eb41d5e4573984fb100c0b295f3010381823",
+              "size": 792100
+            }
+          ],
+          "format": "language-input-model-pack-v1",
+          "license": "CC-BY-4.0",
+          "notice_sha256": "7c9f496caf3e2dbf0a96d048e18f5b57467a4714c00c32c7f458eb2c95c5f15a",
+          "provides": [
+            "en"
+          ],
+          "repository": "quickmt/quickmt-zh-en",
+          "requires": [],
+          "revision": "c27cc8024e01a047733a1e34796e2ab19d74b237",
+          "runtime_bytes": 409706714
+        },
+        "pack_sha256": "fc1df39f7620febd18256a5ce13082e83543dc240d140a8281926044087065a7",
+        "pack_size": 409710191
+      }
+    }
+  },
+  "ok": true
+}

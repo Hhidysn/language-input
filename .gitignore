@@ -65,3 +65,20 @@ arm64x_wrapper/*.dll
 arm64x_wrapper/*.ime
 arm64x_wrapper/*.lib
 arm64x_wrapper/*.exp
+
+# ---- settings app + tooling (added by this fork) ----
+.opencode/
+third-party/
+settings-app/.venv/
+settings-app/build/
+settings-app/dist/
+settings-app/.shots/
+settings-app/.m0/
+settings-app/.work/
+patches/model-host/.venv/
+patches/model-host/build/
+patches/model-host/dist/
+patches/model-host/backup/
+patches/model-host/harness/results/
+*.bak-*
+*.part
