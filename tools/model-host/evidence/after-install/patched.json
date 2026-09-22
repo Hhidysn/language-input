@@ -1,0 +1,75 @@
+{
+  "name": "patched",
+  "exe": "C:\\Program Files\\Rime\\weasel-0.1.0\\LanguageInputModelHost.exe",
+  "port": 51235,
+  "startup_s": 1.4340805000101682,
+  "health_first_s": 0.006046700000297278,
+  "health_samples_s": [
+    0.0063808999984757975,
+    0.006316999992122874,
+    0.006481699994765222,
+    0.0179502999963006,
+    0.02952670000377111
+  ],
+  "zh_en_first_s": 1.7251135000115028,
+  "warm_samples_s": [
+    0.02755290000641253,
+    0.033066199990571477,
+    0.02916710000135936,
+    0.028354800000670366,
+    0.030337199990754016
+  ],
+  "responses": {
+    "zh-en": {
+      "status": 200,
+      "json": {
+        "id": "language-input-local",
+        "object": "chat.completion",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"打字\":\"Typing; Typography\",\"搭子\":\"Hitches; Hittite\",\"大\":\"Big; The Big\"}"
+            }
+          }
+        ]
+      }
+    },
+    "zh-ja": {
+      "status": 200,
+      "json": {
+        "id": "language-input-local",
+        "object": "chat.completion",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"打字\":\"タイピング; 入力\",\"搭子\":\"ヒッチハイク; ヒッチコック\",\"大\":\"ビッグ\"}"
+            }
+          }
+        ]
+      }
+    },
+    "zh-es": {
+      "status": 200,
+      "json": {
+        "id": "language-input-local",
+        "object": "chat.completion",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"打字\":\"Tipificación; Tirando\",\"搭子\":\"Hitches; Hittches\",\"大\":\"Grande; Gran grande\"}"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "health_running": true,
+  "exit_code": 1,
+  "port_still_open": false
+}
