@@ -26,3 +26,6 @@ settings-app/.m0/
 # ---- upstream reference clones (separate repositories, not part of this product) ----
 # third-party/{MSIME-Windows,qingjian,weasel} are reference checkouts; keep them out of this repo
 third-party/
+
+# ---- lane scratch dirs ----
+settings-app/.work/
