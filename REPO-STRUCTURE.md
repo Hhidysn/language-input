@@ -3,6 +3,9 @@
 这是**产品仓**：个人 fork `Hhidysn/weasel` 的引擎改动 + 自研 Windows 设置应用。
 分支 `language-input-settings`，基点 = fork 提交 `a57d7f0`（基于上游 `rime/weasel` tag `0.17.4`）。
 
+> 产品说明与效果 → [`README.md`](README.md)　|　**归属与许可（哪些是我们的、哪些是开源的）** → [`ATTRIBUTION.md`](ATTRIBUTION.md)
+> 上游 Weasel 的原始说明 → [`README-weasel.md`](README-weasel.md)
+
 ## 目录归属
 
 | 路径 | 归属 | 说明 |
@@ -13,7 +16,7 @@
 | `patches/` | 本 fork 自有 | 上游构建补丁：`librime-sensitive-mode.patch`（librime 敏感域门控）、`boost-1.84-msvc-14.4.patch`；**模型宿主性能修复已改为源码内直接修改**（`scripts/language_input_model_host.py`），不再是补丁 |
 | `librime/` `plum/` | 子模块（上游） | `rime/librime`、`rime/plum`；克隆需 `--recursive` |
 | `settings-app/` | **本项目自研** | PySide6 托盘设置应用（与引擎仅通过注册表/可执行文件对接） |
-| `tools/` | 本项目自研 | 构建编排脚本 + 模型宿主构建/应用/回滚与验证工具（`tools/model-host/`） |
+| `tools/` | 本项目自研 | 构建编排（`build-all.ps1` / `build-engine.ps1`）+ 模型宿主工具（`tools/model-host/`：构建/安装/回滚/验证）+ 引擎二进制替换（`tools/engine/`：备份 + 提权替换 + 重启 `WeaselServer.exe`） |
 | `third-party/` `.opencode/` `deps/` `output/` `.cache/` | 本地/外部 | 已忽略；Boost 等构建依赖不入库 |
 
 ## 构建顺序
