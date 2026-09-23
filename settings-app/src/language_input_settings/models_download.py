@@ -193,14 +193,19 @@ def download_file(
     progress: ProgressCallback | None = None,
     timeout: float = _DEFAULT_TIMEOUT,
     resume: bool = True,
+    retries: int = 10,
     allow_http: bool = False,
     use_system_proxy: bool = False,
 ) -> dict:
     """Download ``url`` to ``dest`` with verification.
 
     Resumes from ``<dest>.part`` when present (``Range``).  On integrity
-    failure the ``.part`` file is deleted; on a transient network error it is
-    kept so a later call can resume.  Returns a small stats dict.
+    failure the ``.part`` file is deleted.  On a transient network error the
+    partial file is KEPT and the attempt is retried up to ``retries`` times
+    (short backoff), each retry resuming from the bytes already on disk — the
+    link to the model host is slow and drops mid-file, so a single attempt is
+    not enough (observed: a 409 MB file failing around 70 MB).  Returns a small
+    stats dict.
 
     ``use_system_proxy`` defaults to ``False`` so the environment's throttling
     proxy is bypassed (see the module docstring).
@@ -218,30 +223,49 @@ def download_file(
         resume_from = 0
     started = time.monotonic()
 
-    try:
-        written, resumed = _download_once(
-            url,
-            part,
-            resume_from,
-            timeout,
-            allow_http,
-            progress,
-            expected_size,
-            use_system_proxy,
-        )
-    except IntegrityError:
-        _discard(part)
-        raise
-    except (
-        urllib.error.URLError,
-        urllib.error.HTTPError,
-        socket.timeout,
-        TimeoutError,
-        ConnectionError,
-        http.client.HTTPException,
-    ) as exc:
-        # Keep the partial file so the next call can resume.
-        raise DownloadError(f"download failed ({url}): {exc}") from exc
+    attempts = max(1, int(retries))
+    written = 0
+    resumed = 0
+    last_exc: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        # The previous attempt may have appended bytes, so re-read the resume
+        # point every time (and keep the oversized-.part guard).
+        resume_from = part.stat().st_size if (resume and part.is_file()) else 0
+        if expected_size is not None and resume_from >= expected_size:
+            _discard(part)
+            resume_from = 0
+        try:
+            written, resumed = _download_once(
+                url,
+                part,
+                resume_from,
+                timeout,
+                allow_http,
+                progress,
+                expected_size,
+                use_system_proxy,
+            )
+            break
+        except IntegrityError:
+            _discard(part)
+            raise
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            socket.timeout,
+            TimeoutError,
+            ConnectionError,
+            http.client.HTTPException,
+        ) as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                # Keep the partial file so a later call can still resume.
+                raise DownloadError(
+                    f"download failed after {attempts} attempt(s) ({url}): {exc}"
+                ) from exc
+            time.sleep(min(2.0 * attempt, 8.0))
+    else:  # pragma: no cover - the loop always breaks or raises
+        raise DownloadError(f"download failed ({url}): {last_exc}")
 
     actual_size = part.stat().st_size
     digest = sha256_file(part)

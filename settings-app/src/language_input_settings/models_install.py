@@ -110,8 +110,31 @@ def synthesize_component(
 
     Returns ``{"record": ..., "verify": ...}``.
     """
-    files_dir = Path(files_dir)
     staging = Path(staging_dir)
+    try:
+        return _synthesize_component_into(
+            component,
+            Path(files_dir),
+            staging,
+            license_path=license_path,
+            notice_path=notice_path,
+        )
+    except BaseException:
+        # Never leave a half-built staging directory behind on failure; the
+        # caller would otherwise have to clean it up (observed leak: a failed
+        # install left ``.staging-<id>-<uuid>`` inside the model root).
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def _synthesize_component_into(
+    component: ModelComponent,
+    files_dir: Path,
+    staging: Path,
+    *,
+    license_path: Path | str | None = None,
+    notice_path: Path | str | None = None,
+) -> dict:
     if staging.exists():
         raise FileExistsError(f"staging directory already exists: {staging}")
     staging.mkdir(parents=True)
