@@ -184,6 +184,19 @@ the installed Luna Pinyin dictionary are preserved.
 The binary format readers and pinyin index tables are based on
 [rose v2.1.2](https://github.com/nopdan/rose/tree/v2.1.2), licensed GPL-3.0.
 
+## Matching Sogou Xiaohe fuzzy pinyin
+
+In 设置 → 按键与开关 → 小鹤双拼模糊音, click 同步到小狼毫 to read the current
+Windows user's `%USERPROFILE%\AppData\LocalLow\SogouPY\Fuzzy.dat`. Only its
+active `[Fuzzy]` pairs are synchronized; `[Gray]` suggestion pairs are ignored.
+The sync supports `zh/z`, `ch/c`, `sh/s`, `n/l`, `ing/in`, `iang/ian`, and
+`uang/uan`, plus `h/f`, `l/r`, `ang/an`, and `eng/en` when explicitly enabled
+under `[Fuzzy]`. It inserts Rime `derive` rules before Xiaohe's double-pinyin
+conversion through the user's `language_input_flypy.custom.yaml` and redeploys.
+Existing settings and the full-pinyin schema are left in place. Unknown fuzzy
+pairs or conflicting user-defined algebra patches cause an explicit error
+instead of silently changing their meaning.
+
 ## Notes
 
 * Runtime dependencies are **PySide6-Essentials**, **ruamel.yaml**, and

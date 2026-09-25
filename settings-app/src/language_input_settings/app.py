@@ -90,7 +90,7 @@ PAGE_SPECS = [
         "keys",
         "按键与开关",
         "Keys & Switches",
-        "把隐藏的 F4 开关变成受约束的可视化配置（遵守 Lua 的强制关系）。",
+        "配置 F4 开关、搜狗模糊音与快捷键。",
     ),
     (
         "about",
@@ -2693,6 +2693,36 @@ if _HAS_QT:
             switches_card.body.addWidget(self.busy)
             layout.addWidget(switches_card)
 
+            fuzzy_card = Card()
+            fuzzy_heading = QLabel("小鹤双拼模糊音")
+            fuzzy_heading.setObjectName("SectionHeading")
+            fuzzy_card.body.addWidget(fuzzy_heading)
+            fuzzy_card.body.addWidget(_caption_label(
+                "读取搜狗本机 Fuzzy.dat 中已启用的模糊音，同步到小狼毫小鹤双拼。"
+                "灰色候选规则不计入；全拼方案不受影响。"
+            ))
+            self.fuzzy_state = QLabel("")
+            self.fuzzy_state.setObjectName("DetailValue")
+            self.fuzzy_state.setWordWrap(True)
+            fuzzy_card.body.addWidget(self.fuzzy_state)
+            fuzzy_actions = QHBoxLayout()
+            self.fuzzy_refresh = QPushButton("刷新搜狗设置")
+            self.fuzzy_refresh.clicked.connect(self._refresh_fuzzy)
+            fuzzy_actions.addWidget(self.fuzzy_refresh)
+            fuzzy_actions.addStretch(1)
+            self.fuzzy_apply = QPushButton("同步到小狼毫")
+            self.fuzzy_apply.setObjectName("PrimaryButton")
+            self.fuzzy_apply.clicked.connect(self._on_sync_fuzzy)
+            fuzzy_actions.addWidget(self.fuzzy_apply)
+            fuzzy_card.body.addLayout(fuzzy_actions)
+            self.fuzzy_strip = QLabel("")
+            self.fuzzy_strip.setObjectName("StatusStrip")
+            self.fuzzy_strip.setWordWrap(True)
+            fuzzy_card.body.addWidget(self.fuzzy_strip)
+            self.fuzzy_busy = BusyStrip()
+            fuzzy_card.body.addWidget(self.fuzzy_busy)
+            layout.addWidget(fuzzy_card)
+
             hotkey_card = Card()
             hotkey_heading = QLabel("按键速查（只读）")
             hotkey_heading.setObjectName("SectionHeading")
@@ -2765,12 +2795,14 @@ if _HAS_QT:
             self._tx = TransactionController(
                 self.busy, self._interactive_controls, parent=self
             )
+            self._refresh_fuzzy()
 
         # -- off-thread transaction support --
 
         def _interactive_controls(self):
             controls = [self.refresh_button, self.apply_button, self.schema_combo,
-                        self.neutralize_button, self.revert_button]
+                        self.neutralize_button, self.revert_button,
+                        self.fuzzy_refresh, self.fuzzy_apply]
             controls.extend(self._checkboxes.values())
             controls.extend(self._radios.values())
             return controls
@@ -2779,6 +2811,52 @@ if _HAS_QT:
             return self._tx.active
 
         # -- helpers --
+
+        def _refresh_fuzzy(self) -> None:
+            from . import fuzzy_pinyin
+
+            try:
+                state = fuzzy_pinyin.preview_sogou_fuzzy()
+            except Exception as exc:  # pragma: no cover - malformed local config
+                self.fuzzy_state.setText(str(exc))
+                self.fuzzy_apply.setEnabled(False)
+                _update_strip(self.fuzzy_strip, "warning", "无法读取可同步的搜狗模糊音。")
+                return
+            pairs = "、".join(f"{left}/{right}" for left, right in state["pairs"])
+            self.fuzzy_state.setText("搜狗已启用：" + (pairs or "无"))
+            self.fuzzy_apply.setEnabled(bool(state["pairs"]) or not state["synced"])
+            _update_strip(
+                self.fuzzy_strip,
+                "success" if state["synced"] else "neutral",
+                "小狼毫已同步。" if state["synced"] else "点击「同步到小狼毫」后重新部署生效。",
+            )
+
+        def _on_sync_fuzzy(self) -> None:
+            from . import fuzzy_pinyin
+
+            self._tx.run(
+                "正在同步模糊音并重新部署…",
+                fuzzy_pinyin.sync_sogou_fuzzy,
+                busy=self.fuzzy_busy,
+                on_success=self._on_sync_fuzzy_done,
+                on_error=self._on_sync_fuzzy_error,
+            )
+
+        def _on_sync_fuzzy_done(self, result: dict) -> None:
+            self._refresh_fuzzy()
+            if result.get("clean"):
+                _update_strip(self.fuzzy_strip, "success", "搜狗模糊音已同步并重新部署。")
+            else:
+                deployed = result.get("deploy") or {}
+                _update_strip(
+                    self.fuzzy_strip,
+                    "warning",
+                    "规则已保存，但部署未验证成功："
+                    + (deployed.get("stderr") or deployed.get("note") or "请检查部署日志。"),
+                )
+
+        def _on_sync_fuzzy_error(self, message: str) -> None:
+            _update_strip(self.fuzzy_strip, "error", f"模糊音同步失败：{message}")
 
         def _clear_switches(self) -> None:
             while self._switches_box.count():
