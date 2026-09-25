@@ -4184,6 +4184,15 @@ if _HAS_QT:
 
         def show_window(self) -> None:
             self.window.show()
+            if sys.platform == "win32":
+                # Windows can override the first ShowWindow call for a process
+                # started with SW_HIDE. Restore when opening from the tray.
+                import ctypes
+                from ctypes import wintypes
+
+                show_window = ctypes.WinDLL("user32", use_last_error=True).ShowWindow
+                show_window.argtypes = [wintypes.HWND, ctypes.c_int]
+                show_window(int(self.window.winId()), 9)  # SW_RESTORE
             self.window.raise_()
             self.window.activateWindow()
 
