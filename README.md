@@ -60,10 +60,11 @@ GitHub Actions 的 [Package Language Input](.github/workflows/release-ci.yml) �
 ```powershell
 git clone --recursive <repo>                       # 1. 取 librime / plum 子模块
 git -C librime apply ../patches/librime-sensitive-mode.patch   # 2. 打引擎补丁
-.\build.bat release rime data opencc weasel        # 3. 构建完整引擎和数据
-.\tools\model-host\build.ps1                       # 4. 重建模型宿主
-.\settings-app\packaging\build.ps1                 # 5. 打包设置应用
-.\scripts\package_release.ps1 -Version 0.1.0      # 6. 暂存组件并生成同一个安装包
+.\build.bat release rime                            # 3. 构建 librime
+.\build.bat release data opencc weasel              # 4. 构建数据和小狼毫
+.\tools\model-host\build.ps1                       # 5. 重建模型宿主
+.\settings-app\packaging\build.ps1                 # 6. 打包设置应用
+.\scripts\package_release.ps1 -Version 0.1.0      # 7. 暂存组件并生成同一个安装包
 ```
 
 > “clone 就能编译”指**源码齐全、步骤明确**；引擎构建仍需要上述工具链。

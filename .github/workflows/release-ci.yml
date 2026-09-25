@@ -67,7 +67,7 @@ jobs:
 
       - name: Cache Boost libraries
         id: boost-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.BOOST_ROOT }}
           key: windows-2022-boost-1.84.0-msvc-14.3-x86-x64-v1
@@ -88,6 +88,13 @@ jobs:
             throw 'Boost build did not produce libraries.'
           }
 
+      - name: Save Boost cache
+        if: steps.boost-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.BOOST_ROOT }}
+          key: windows-2022-boost-1.84.0-msvc-14.3-x86-x64-v1
+
       - name: Apply input method patch to librime
         shell: pwsh
         run: |
@@ -96,11 +103,20 @@ jobs:
           git -C librime apply ..\patches\librime-sensitive-mode.patch
           if ($LASTEXITCODE -ne 0) { throw 'Could not patch librime.' }
 
-      - name: Build Rime, data and Weasel
+      - name: Build Rime engine
         shell: pwsh
         run: |
-          & cmd.exe /d /c 'call build.bat release rime data opencc weasel'
-          if ($LASTEXITCODE -ne 0) { throw "Native build failed: $LASTEXITCODE" }
+          & cmd.exe /d /c 'call build.bat release rime'
+          if ($LASTEXITCODE -ne 0) { throw "Rime build failed: $LASTEXITCODE" }
+          foreach ($path in @('output\rime.dll', 'output\Win32\rime.dll')) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing Rime output: $path" }
+          }
+
+      - name: Build data and Weasel
+        shell: pwsh
+        run: |
+          & cmd.exe /d /c 'call build.bat release data opencc weasel'
+          if ($LASTEXITCODE -ne 0) { throw "Weasel build failed: $LASTEXITCODE" }
           foreach ($path in @('output\rime.dll', 'output\WeaselServer.exe', 'output\WeaselSetup.exe', 'output\Win32\rime.dll', 'output\Win32\WeaselServer.exe', 'output\data\default.yaml')) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing native output: $path" }
           }
