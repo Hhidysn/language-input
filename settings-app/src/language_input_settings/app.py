@@ -3481,12 +3481,22 @@ if _HAS_QT:
                 _update_strip(self.import_strip, "success", "导入并部署完成；" + summary)
             else:
                 deploy = result.get("deploy") or {}
+                stderr = deploy.get("stderr") or ""
+                rejected = stderr.count("invalid syllable")
+                if rejected:
+                    detail = f"Rime 拒绝了 {rejected} 条拼音编码。"
+                elif stderr.strip():
+                    detail = "部署日志：" + stderr.strip().splitlines()[0][-180:]
+                elif deploy.get("clean"):
+                    detail = "部署命令已完成，但未检测到编译后的扩展词库。"
+                else:
+                    detail = deploy.get("note") or "请检查部署日志。"
                 _update_strip(
                     self.import_strip,
                     "warning",
                     "已保存词库，但部署未验证成功；"
                     + summary
-                    + f" 部署信息：{deploy.get('note') or '请检查部署日志。'}",
+                    + " " + detail,
                 )
 
         def _on_import_error(self, message: str) -> None:
