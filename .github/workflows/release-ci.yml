@@ -28,7 +28,7 @@ jobs:
         run: git config --global core.autocrlf false
 
       - name: Checkout source and submodules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
@@ -53,9 +53,9 @@ jobs:
           Write-Host "Package version: $version"
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: '3.11.15'
+          python-version: '3.11'
           architecture: x64
 
       - name: Add MSBuild to PATH
@@ -67,7 +67,7 @@ jobs:
 
       - name: Cache Boost libraries
         id: boost-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.BOOST_ROOT }}
           key: windows-2022-boost-1.84.0-msvc-14.3-x86-x64-v1
@@ -147,7 +147,7 @@ jobs:
           if (-not $expected.StartsWith($hash)) { throw 'Installer checksum mismatch.' }
 
       - name: Upload downloadable package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: LanguageInput-${{ env.PACKAGE_VERSION }}-Windows
           if-no-files-found: error
