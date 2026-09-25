@@ -488,6 +488,11 @@ void RimeWithWeaselHandler::FocusIn(DWORD client_caps, WeaselSessionId ipc_id) {
                        Bool(sensitive));
   if (!sensitive)
     m_remote_gloss->SetSessionSensitive(session_id, false);
+  if (!sensitive && rime_api->get_option(session_id, "language_input_gloss") &&
+      rime_api->get_option(session_id, "language_input_ai"))
+    m_remote_gloss->PrepareLocalModel(
+        session_id, LanguageInputTargetLanguage(session_id),
+        LanguageInputModel(session_id));
   if (sensitive)
     m_speech->Stop();
   _UpdateUI(ipc_id);
@@ -623,6 +628,9 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
       !rime_api->get_option(session_id, "language_input_sensitive");
   const std::string target_language =
       LanguageInputTargetLanguage(session_id);
+  if (remote_enabled)
+    m_remote_gloss->PrepareLocalModel(
+        session_id, target_language, LanguageInputModel(session_id));
   std::vector<std::string> remote_misses;
   for (int i = 0; i < ctx.menu.num_candidates; ++i) {
     const RimeCandidate& candidate = ctx.menu.candidates[i];
@@ -698,6 +706,20 @@ void RimeWithWeaselHandler::SetOption(WeaselSessionId ipc_id,
     const RimeSessionId session_id =
         to_session_id(ipc_id ? ipc_id : m_active_session);
     m_remote_gloss->InvalidateSession(session_id);
+  }
+  if (opt == "language_input_ai" || opt == "language_input_gloss" ||
+      opt == "language_input_en" || opt == "language_input_ja" ||
+      opt == "language_input_es" ||
+      opt == "language_input_model_m2m100") {
+    const RimeSessionId session_id =
+        to_session_id(ipc_id ? ipc_id : m_active_session);
+    if (session_id &&
+        !rime_api->get_option(session_id, "language_input_sensitive") &&
+        rime_api->get_option(session_id, "language_input_gloss") &&
+        rime_api->get_option(session_id, "language_input_ai"))
+      m_remote_gloss->PrepareLocalModel(
+          session_id, LanguageInputTargetLanguage(session_id),
+          LanguageInputModel(session_id));
   }
 }
 

@@ -103,6 +103,12 @@ class RemoteGlossService {
                     const std::vector<std::string>& words,
                     std::string_view model);
 
+  // Preload a local QuickMT route after a normal input field gains focus.
+  // This sends only the language and model, never candidate text.
+  void PrepareLocalModel(uintptr_t session_id,
+                         std::string_view language,
+                         std::string_view model);
+
   // Errors are consumed by the UI refresh path. Sensitive sessions never
   // expose an error and never retain one for later display.
   RemoteGlossError TakeLastError(uintptr_t session_id);

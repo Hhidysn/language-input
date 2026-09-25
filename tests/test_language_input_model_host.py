@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.build_m2m100_model_pack import build_pack as build_m2m100_pack
 from scripts.build_limodel_pack import build_pack
@@ -24,6 +25,8 @@ from scripts.language_input_model_host import (
     is_unsafe_source,
     load_m2m100_pack_catalog,
     load_pack_catalog,
+    MissingModelComponentError,
+    QuickMtRuntime,
 )
 
 
@@ -258,6 +261,23 @@ class LanguageInputModelHostTests(unittest.TestCase):
             install_pack(ja_pack, catalog, models)
             self.assertEqual({"fixture-en", "fixture-ja"}, set(installed_components(models)))
 
+    def test_quickmt_prepares_only_the_requested_route(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog, packs = self.make_three_pack_catalog(root)
+            models = root / "models"
+            for language in ("en", "ja", "es"):
+                install_pack(packs[language][0], catalog, models)
+            with patch("scripts.language_input_model_host.SentencePieceStage") as stage:
+                runtime = QuickMtRuntime(models, catalog)
+                runtime.prepare("en")
+                self.assertEqual(1, stage.call_count)
+                (models / "fixture-es" / "model" / "model.bin").write_bytes(b"tampered")
+                runtime.prepare("en")
+                self.assertEqual(1, stage.call_count)
+                with self.assertRaises(MissingModelComponentError):
+                    runtime.prepare("es")
+
     def test_tampered_pack_is_rejected_before_extraction(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -421,6 +441,25 @@ class LanguageInputModelHostTests(unittest.TestCase):
                 with urllib.request.urlopen(request, timeout=2) as response:
                     document = json.loads(response.read().decode("utf-8"))
                 self.assertEqual("ok", document["status"])
+                warmup_url = f"http://127.0.0.1:{port}/warmup"
+                warmup_body = json.dumps(
+                    {"language": "en", "model": "quickmt-gloss-route-v2"}
+                ).encode("utf-8")
+                without_token = urllib.request.Request(
+                    warmup_url, data=warmup_body, method="POST"
+                )
+                with self.assertRaises(urllib.error.HTTPError) as unauthorized_warmup:
+                    urllib.request.urlopen(without_token, timeout=2)
+                self.assertEqual(401, unauthorized_warmup.exception.code)
+                warmup = urllib.request.Request(
+                    warmup_url,
+                    data=warmup_body,
+                    headers={"Authorization": f"Bearer {token}"},
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as missing_model:
+                    urllib.request.urlopen(warmup, timeout=2)
+                self.assertEqual(409, missing_model.exception.code)
                 process.wait(timeout=4)
                 self.assertEqual(0, process.returncode)
             finally:

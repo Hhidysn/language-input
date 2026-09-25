@@ -937,6 +937,19 @@ class QuickMtRuntime:
             self._stages[component_id] = stage
         return stage
 
+    def prepare(self, language: str) -> None:
+        """Verify and load only the components needed by one target language."""
+        if language not in SUPPORTED_LANGUAGES:
+            raise ValueError("unsupported target language")
+        for component_id in self.catalog["routes"][language]:
+            try:
+                load_installed_component(self.model_root / component_id)
+            except (OSError, ValueError) as error:
+                raise MissingModelComponentError(
+                    f"missing or invalid model component: {component_id}"
+                ) from error
+            self._stage(component_id)
+
     def translate(self, words: Sequence[str], language: str) -> dict[str, str]:
         if language not in SUPPORTED_LANGUAGES:
             raise ValueError("unsupported target language")
@@ -953,14 +966,11 @@ class QuickMtRuntime:
                 unique.append(word)
         if not unique or len(unique) > MAX_WORDS:
             raise ValueError("request must contain one to nine unique words")
-        route = self.catalog["routes"][language]
-        present = installed_components(self.model_root)
-        missing = [component_id for component_id in route if component_id not in present]
-        if missing:
-            raise FileNotFoundError("missing required model component(s): " + ", ".join(missing))
+        self.prepare(language)
         submitted = [word for word in unique if not is_unsafe_source(word)]
         if not submitted:
             return {}
+        route = self.catalog["routes"][language]
         values = submitted
         for component_id in route[:-1]:
             values = self._stage(component_id).translate(values)
@@ -1267,7 +1277,7 @@ class ModelHostHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._json(401, {"error": "unauthorized"})
             return
-        if self.path != "/v1/chat/completions":
+        if self.path not in {"/v1/chat/completions", "/warmup"}:
             self._json(404, {"error": "not-found"})
             return
         try:
@@ -1280,6 +1290,19 @@ class ModelHostHandler(BaseHTTPRequestHandler):
         self.server.last_request = time.monotonic()
         try:
             request = json.loads(self.rfile.read(length).decode("utf-8"))
+            if self.path == "/warmup":
+                if (
+                    not isinstance(request, dict)
+                    or set(request) != {"language", "model"}
+                    or request["model"] != QUICKMT_MODEL_ID
+                    or not isinstance(request["language"], str)
+                    or request["language"] not in SUPPORTED_LANGUAGES
+                ):
+                    raise ValueError("invalid warmup request")
+                self.server.quickmt.prepare(request["language"])
+                self.server.last_request = time.monotonic()
+                self._json(200, {"status": "ready"})
+                return
             language, words, model = _parse_translation_request(request)
             if model == M2M100_MODEL_ID:
                 if self.server.m2m100 is None:

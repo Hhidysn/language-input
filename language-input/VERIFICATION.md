@@ -2,6 +2,31 @@
 
 Baseline: Weasel `9cc96e2` (0.17.4), librime `1c23358` (1.13.1). The librime privacy delta is reproducible from `patches/librime-sensitive-mode.patch`. The Lua plugin and third-party Lua source are pinned by `scripts/prepare_librime_lua.ps1`.
 
+## QuickMT focus preloading check (2026-09-25)
+
+On a Ryzen 7 7745HX, the old first-use path spent about 921 ms verifying all
+three imported components, 909 ms loading the English CTranslate2 stage, and
+65 ms translating nine candidates. The revised path verifies only the selected
+language route. A fresh Python-process English request without preloading took
+1,340 ms; this is still above the one-second typing target.
+
+The authenticated, candidate-free `/warmup` request prepared the English,
+Japanese and Spanish routes in 1,222/946/1,003 ms. Their following nine-word
+requests took 63/90/102 ms in the source Host. A newly built windowed Host and
+the x64 native WinHTTP bridge returned an English nine-candidate page in
+1,796 ms without preloading and 73 ms after preloading. A Win32 bridge smoke
+returned a prepared nine-candidate page in 87 ms. These are request and bridge
+timings, not a claim about full keypress-to-visible-UI p95/p99 on an installed build.
+The first page can still exceed one second when typing starts before preloading
+finishes, after the ten-minute idle shutdown, or after a Host restart.
+
+Checks: `python -m unittest tests.test_language_input_model_host -v` (9/9);
+the x64 and Win32 native `LanguageInputRemoteTests.exe` suites and
+`RimeWithWeasel.vcxproj` builds; and the installed-style
+`--installed-quickmt-cold`, `--installed-quickmt-warmup` and M2M100 smoke tests
+against the newly built Host. The previous installed binaries were not replaced
+for this check.
+
 ## Acceptance matrix
 
 | Requirement | Automated evidence | Runtime evidence | Status |

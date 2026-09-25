@@ -285,6 +285,7 @@ std::optional<ParsedEndpoint> ParseEndpoint(const RemoteGlossConfig& config) {
 struct PostJsonResult {
   std::optional<std::string> body;
   RemoteGlossError error = RemoteGlossError::kTransport;
+  bool connection_failed = false;
 };
 
 PostJsonResult PostJson(const RemoteGlossConfig& config,
@@ -338,7 +339,9 @@ PostJsonResult PostJson(const RemoteGlossConfig& config,
       static_cast<DWORD>(body.size()), 0);
   SecureZeroMemory(headers.data(), headers.size() * sizeof(wchar_t));
   SecureZeroMemory(key->data(), key->size() * sizeof(wchar_t));
-  if (!sent || !WinHttpReceiveResponse(request.get(), nullptr))
+  if (!sent)
+    return {std::nullopt, RemoteGlossError::kTransport, true};
+  if (!WinHttpReceiveResponse(request.get(), nullptr))
     return {};
 
   DWORD status = 0;
@@ -381,7 +384,17 @@ RemoteGlossTransportResult DefaultTransport(
     const RemoteGlossConfig& config,
     const std::vector<std::string>& words) {
   std::string request = BuildRemoteGlossRequest(config, words);
-  auto response = PostJson(config, request);
+  PostJsonResult response;
+  // A newly launched windowed Host may need time to bind its loopback port.
+  // Retry only when WinHTTP could not send; never replay an inference request
+  // after a response timeout or an HTTP error.
+  for (int attempt = 0; attempt < 60; ++attempt) {
+    response = PostJson(config, request);
+    if (!config.use_local_host || !response.connection_failed)
+      break;
+    if (attempt < 59)
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
   if (!response.body)
     return {std::nullopt, response.error};
   auto parsed = ParseRemoteGlossResponse(*response.body, words);
@@ -751,6 +764,7 @@ class RemoteGlossService::Impl {
     if (sensitive) {
       session.last_error = RemoteGlossError::kNone;
       PurgeQueuedJobsLocked(session_id);
+      preparation_requests_.erase(session_id);
     }
   }
 
@@ -763,6 +777,7 @@ class RemoteGlossService::Impl {
       found->second.last_error = RemoteGlossError::kNone;
     }
     PurgeQueuedJobsLocked(session_id);
+    preparation_requests_.erase(session_id);
     sessions_.erase(session_id);
   }
 
@@ -777,6 +792,7 @@ class RemoteGlossService::Impl {
       for (const auto& word : job.words)
         in_flight_.erase(CacheKey(job.model, job.language, word));
     jobs_.clear();
+    preparation_requests_.clear();
   }
 
   std::optional<RemoteGloss> Lookup(uintptr_t session_id,
@@ -821,7 +837,7 @@ class RemoteGlossService::Impl {
     LoadCacheLocked();
     // Candidate pages change on every keystroke. Keep only the newest queued
     // page for this session so an obsolete page cannot delay its replacement.
-    PurgeQueuedJobsLocked(session_id);
+    PurgeQueuedJobsLocked(session_id, false);
     const auto now = std::chrono::steady_clock::now();
     Job job;
     job.session_id = session_id;
@@ -845,6 +861,33 @@ class RemoteGlossService::Impl {
     if (job.words.empty())
       return;
     jobs_.push_front(std::move(job));
+    wake_.notify_one();
+  }
+
+  void PrepareLocalModel(uintptr_t session_id,
+                         std::string_view language,
+                         std::string_view model) {
+    if (!available_ || !config_.use_local_host || !IsLanguageCode(language) ||
+        model != "quickmt-gloss-route-v2")
+      return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!IsNormalSessionLocked(session_id))
+      return;
+    const auto now = std::chrono::steady_clock::now();
+    const std::string route = std::string(model) + "\n" + std::string(language);
+    auto previous = preparation_requests_.find(session_id);
+    if (previous != preparation_requests_.end() &&
+        previous->second.first == route &&
+        now - previous->second.second < std::chrono::minutes(8))
+      return;
+    preparation_requests_[session_id] = {route, now};
+    Job job;
+    job.session_id = session_id;
+    job.generation = sessions_[session_id].generation;
+    job.model = std::string(model);
+    job.language = std::string(language);
+    job.prepare = true;
+    jobs_.push_back(std::move(job));
     wake_.notify_one();
   }
 
@@ -872,6 +915,7 @@ class RemoteGlossService::Impl {
     ++found->second.generation;
     found->second.last_error = RemoteGlossError::kNone;
     PurgeQueuedJobsLocked(session_id);
+    preparation_requests_.erase(session_id);
   }
 
  private:
@@ -887,6 +931,7 @@ class RemoteGlossService::Impl {
     std::string model;
     std::string language;
     std::vector<std::string> words;
+    bool prepare = false;
   };
 
   static std::string CacheKey(std::string_view model,
@@ -911,10 +956,12 @@ class RemoteGlossService::Impl {
            found->second.generation == job.generation;
   }
 
-  void PurgeQueuedJobsLocked(uintptr_t session_id) {
+  void PurgeQueuedJobsLocked(uintptr_t session_id,
+                             bool include_prepare = true) {
     auto job = jobs_.begin();
     while (job != jobs_.end()) {
-      if (job->session_id != session_id) {
+      if (job->session_id != session_id ||
+          (job->prepare && !include_prepare)) {
         ++job;
         continue;
       }
@@ -1078,11 +1125,45 @@ class RemoteGlossService::Impl {
       }
 
       RemoteGlossTransportResult transport_result;
+      if (job.prepare) {
+        if (local_host_.EnsureRunning(config_)) {
+          RemoteGlossConfig warm_config = config_;
+          const std::string suffix = "/v1/chat/completions";
+          if (warm_config.endpoint.size() >= suffix.size() &&
+              warm_config.endpoint.compare(
+                  warm_config.endpoint.size() - suffix.size(), suffix.size(),
+                  suffix) == 0) {
+            warm_config.endpoint.replace(
+                warm_config.endpoint.size() - suffix.size(), suffix.size(),
+                "/warmup");
+            warm_config.connect_timeout_ms = 200;
+            const std::string body = boost::json::serialize(
+                boost::json::object{{"language", job.language},
+                                    {"model", job.model}});
+            for (int attempt = 0; attempt < 60; ++attempt) {
+              auto response = PostJson(warm_config, body);
+              if (response.body || !response.connection_failed)
+                break;
+              if (attempt < 59)
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+          }
+        }
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          --active_jobs_;
+          if (jobs_.empty() && active_jobs_ == 0)
+            idle_.notify_all();
+        }
+        continue;
+      }
       if (!config_.use_local_host || local_host_.EnsureRunning(config_)) {
         RemoteGlossConfig request_config = config_;
         request_config.language = job.language;
-        if (config_.use_local_host)
+        if (config_.use_local_host) {
           request_config.model = job.model;
+          request_config.connect_timeout_ms = 250;
+        }
         // A local transport error includes an inference timeout or Host 5xx
         // response. Retrying a local model request here would duplicate
         // expensive inference. The result below records the failure and
@@ -1154,6 +1235,10 @@ class RemoteGlossService::Impl {
   std::thread worker_;
   std::deque<Job> jobs_;
   std::unordered_map<uintptr_t, Session> sessions_;
+  std::unordered_map<
+      uintptr_t,
+      std::pair<std::string, std::chrono::steady_clock::time_point>>
+      preparation_requests_;
   RemoteGlossMap cache_;
   std::unordered_set<std::string> in_flight_;
   std::unordered_map<std::string, std::chrono::steady_clock::time_point>
@@ -1211,6 +1296,12 @@ void RemoteGlossService::QueueMissing(
     const std::vector<std::string>& words,
     std::string_view model) {
   impl_->QueueMissing(session_id, language, words, model);
+}
+
+void RemoteGlossService::PrepareLocalModel(uintptr_t session_id,
+                                           std::string_view language,
+                                           std::string_view model) {
+  impl_->PrepareLocalModel(session_id, language, model);
 }
 
 RemoteGlossError RemoteGlossService::TakeLastError(uintptr_t session_id) {

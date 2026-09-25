@@ -69,7 +69,10 @@ int wmain(int argc, wchar_t** argv) {
     return 0;
   }
 
-  if (argc == 4 && std::wstring(argv[1]) == L"--installed-smoke") {
+  if (argc == 4 &&
+      (std::wstring(argv[1]) == L"--installed-smoke" ||
+       std::wstring(argv[1]) == L"--installed-quickmt-warmup" ||
+       std::wstring(argv[1]) == L"--installed-quickmt-cold")) {
     using namespace std::chrono_literals;
     using weasel::language_input::RemoteGlossConfig;
     using weasel::language_input::RemoteGlossError;
@@ -84,10 +87,13 @@ int wmain(int argc, wchar_t** argv) {
     std::filesystem::remove_all(smoke_root, smoke_error);
     std::filesystem::create_directories(smoke_root);
 
+    const bool quickmt = std::wstring(argv[1]) != L"--installed-smoke";
+    const bool warmup =
+        std::wstring(argv[1]) == L"--installed-quickmt-warmup";
     RemoteGlossConfig config;
     config.enabled = true;
     config.use_local_host = true;
-    config.model = "m2m100-418m-int8";
+    config.model = quickmt ? "quickmt-gloss-route-v2" : "m2m100-418m-int8";
     config.language = "en";
     config.cache_path = smoke_root / L"cache.json";
     config.local_host_executable = install_root / L"LanguageInputModelHost.exe";
@@ -104,12 +110,35 @@ int wmain(int argc, wchar_t** argv) {
       RemoteGlossService service(config, {}, [&](uintptr_t) { ++completions; });
       Check(service.available(), "the installed C++ smoke configuration is usable");
       service.SetSessionSensitive(42, false);
-      service.QueueMissing(42, "en", {u8"你好"}, config.model);
+      if (warmup) {
+        service.PrepareLocalModel(42, "en", config.model);
+        Check(service.WaitUntilIdleForTesting(90s),
+              "QuickMT background preload should finish");
+      }
+      const auto request_start = std::chrono::steady_clock::now();
+      const std::vector<std::string> words = quickmt
+          ? std::vector<std::string>{u8"你好", u8"世界", u8"学习", u8"工作",
+                                     u8"今天", u8"明天", u8"朋友", u8"电脑",
+                                     u8"语言"}
+          : std::vector<std::string>{u8"你好"};
+      service.QueueMissing(42, "en", words, config.model);
       Check(service.WaitUntilIdleForTesting(90s),
             "the installed C++ smoke request should finish");
+      if (quickmt) {
+        const auto elapsed = std::chrono::steady_clock::now() - request_start;
+        std::cout << "QuickMT first request "
+                  << (warmup ? "after warmup" : "without warmup") << ": "
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(
+                         elapsed)
+                         .count()
+                  << " ms\n";
+        if (warmup)
+          Check(elapsed < 1s,
+                "the prepared QuickMT request must finish within 1s");
+      }
       auto gloss = service.Lookup(42, "en", u8"你好", config.model);
-      Check(gloss && gloss->text == "Hello",
-            "the installed C++ smoke request should return the M2M100 gloss");
+      Check(gloss && (quickmt ? !gloss->text.empty() : gloss->text == "Hello"),
+            "the installed C++ smoke request should return the selected gloss");
       Check(service.TakeLastError(42) == RemoteGlossError::kNone,
             "the installed C++ smoke request should not report an error");
       Check(completions == 1,
@@ -392,7 +421,13 @@ int wmain(int argc, wchar_t** argv) {
         [&](uintptr_t) { ++local_failure_completions; });
     Check(service.available(),
           "the local transport retry regression fixture must be usable");
+    service.PrepareLocalModel(7, "en", "quickmt-gloss-route-v2");
+    Check(service.WaitUntilIdleForTesting(100ms),
+          "an unknown sensitive session must not start model preparation");
     service.SetSessionSensitive(7, false);
+    service.PrepareLocalModel(7, "en", local_config.model);
+    Check(service.WaitUntilIdleForTesting(100ms),
+          "M2M100 selection must not start QuickMT preparation");
     service.QueueMissing(7, "en", {u8"本地失败"}, local_config.model);
     Check(service.WaitUntilIdleForTesting(2s),
           "a local transport failure must finish without repeated retries");
