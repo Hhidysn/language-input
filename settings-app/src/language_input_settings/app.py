@@ -66,7 +66,7 @@ PAGE_SPECS = [
         "translation",
         "翻译",
         "Translation",
-        "选择本地模型或外接 API，配置端点、密钥、外接模型与语言。",
+        "选择翻译后端与本地目标语言；外接 API 可单独配置端点和密钥。",
     ),
     (
         "models",
@@ -1776,9 +1776,10 @@ if _HAS_QT:
             ("off", "关闭 AI 传输"),
         )
 
-        def __init__(self, title: str, description: str, open_switches=None) -> None:
+        def __init__(self, title: str, description: str, open_switches=None, open_models=None) -> None:
             super().__init__()
             self._open_switches = open_switches
+            self._open_models = open_models
             self.setObjectName("PageRoot")
             layout = QVBoxLayout(self)
             layout.setContentsMargins(24, 24, 24, 24)
@@ -1805,6 +1806,11 @@ if _HAS_QT:
                 segmented_layout.addWidget(button)
             self._backend_buttons.buttonClicked.connect(self._on_backend_changed)
             backend_card.body.addWidget(segmented)
+            self.backend_pending_label = QLabel("")
+            self.backend_pending_label.setObjectName("CardHint")
+            self.backend_pending_label.setWordWrap(True)
+            self.backend_pending_label.hide()
+            backend_card.body.addWidget(self.backend_pending_label)
             backend_card.body.addWidget(
                 _caption_label(
                     "本地模型离线译注；外接 API 需要端点与密钥；关闭 AI 传输不影响词典译注。"
@@ -1812,7 +1818,7 @@ if _HAS_QT:
             )
             layout.addWidget(backend_card)
 
-            backend_card.body.addWidget(_caption_label("方案译注开关（按已保存设置判断）"))
+            backend_card.body.addWidget(_caption_label("候选译注状态"))
             switch_row = QHBoxLayout()
             switch_row.setSpacing(8)
             self.switch_status_label = QLabel("")
@@ -1823,6 +1829,48 @@ if _HAS_QT:
             self.open_switches_button.clicked.connect(self._go_to_switches)
             switch_row.addWidget(self.open_switches_button, 0, Qt.AlignTop)
             backend_card.body.addLayout(switch_row)
+
+            # The Rime target-language switches control local translation.
+            # The language in the API form below applies only to the remote API.
+            self.local_card = Card()
+            local_heading = QLabel("本地翻译 · QuickMT")
+            local_heading.setObjectName("SectionHeading")
+            self.local_card.body.addWidget(local_heading)
+            self.local_card.body.addWidget(_caption_label(
+                "选择候选译注的目标语言。应用后会启用 AI 译注和 QuickMT，并短暂重启输入法。"
+            ))
+            local_row = QHBoxLayout()
+            local_row.setSpacing(8)
+            local_label = QLabel("目标语言")
+            local_label.setObjectName("DetailLabel")
+            local_row.addWidget(local_label)
+            self.local_language_combo = QComboBox()
+            for code in ("en", "ja", "es"):
+                self.local_language_combo.addItem(language_label(code), code)
+            local_row.addWidget(self.local_language_combo, 1)
+            self.apply_language_button = QPushButton("应用本地语言")
+            self.apply_language_button.setObjectName("PrimaryButton")
+            self.apply_language_button.clicked.connect(self._on_apply_local_language)
+            local_row.addWidget(self.apply_language_button)
+            self.local_card.body.addLayout(local_row)
+            self.local_language_status = QLabel("")
+            self.local_language_status.setObjectName("CardHint")
+            self.local_language_status.setWordWrap(True)
+            self.local_card.body.addWidget(self.local_language_status)
+            self.open_models_button = QPushButton("查看或安装模型")
+            self.open_models_button.clicked.connect(self._go_to_models)
+            self.local_card.body.addWidget(self.open_models_button, 0, Qt.AlignLeft)
+            self.local_result = QLabel("")
+            self.local_result.setObjectName("StatusStrip")
+            self.local_result.setWordWrap(True)
+            self.local_result.hide()
+            self.local_card.body.addWidget(self.local_result)
+            self._local_coverage = {}
+            self._effective_backend = "local"
+            self.local_language_combo.currentIndexChanged.connect(
+                self._update_local_language_status
+            )
+            layout.addWidget(self.local_card)
 
             # -- remote API form + primary action --
             form_card = Card()
@@ -1856,6 +1904,9 @@ if _HAS_QT:
             form.addRow("API 密钥", key_row)
             form.addRow("模型", self.model_edit)
             form.addRow("目标语言", self.language_combo)
+            form_card.body.addWidget(_caption_label(
+                "这里的语言只用于外接 API；本地模型请在上方切换。"
+            ))
             form_card.body.addLayout(form)
 
             test_row = QHBoxLayout()
@@ -1870,12 +1921,13 @@ if _HAS_QT:
             test_row.addStretch(1)
             form_card.body.addLayout(test_row)
             layout.addWidget(form_card)
+            self.remote_card = form_card
 
             # -- page-level primary action (kept outside the API card so it is
             #    always enabled and clearly applies the whole page) --
             actions = QHBoxLayout()
             actions.addStretch(1)
-            self.apply_button = QPushButton("应用")
+            self.apply_button = QPushButton("应用后端")
             self.apply_button.setObjectName("PrimaryButton")
             self.apply_button.clicked.connect(self._on_apply)
             actions.addWidget(self.apply_button)
@@ -1922,11 +1974,14 @@ if _HAS_QT:
             layout.addWidget(details)
             layout.addStretch(1)
 
-            # -- tab order: backend -> url -> key -> toggle -> model -> language -> apply --
+            # -- tab order: backend -> local language -> remote API -> apply --
             segmented_buttons = self._backend_buttons.buttons()
             for earlier, later in zip(segmented_buttons, segmented_buttons[1:]):
                 self.setTabOrder(earlier, later)
-            self.setTabOrder(segmented_buttons[-1], self.open_switches_button)
+            self.setTabOrder(segmented_buttons[-1], self.local_language_combo)
+            self.setTabOrder(self.local_language_combo, self.apply_language_button)
+            self.setTabOrder(self.apply_language_button, self.open_models_button)
+            self.setTabOrder(self.open_models_button, self.open_switches_button)
             self.setTabOrder(self.open_switches_button, self.url_edit)
             self.setTabOrder(self.url_edit, self.api_key_edit)
             self.setTabOrder(self.api_key_edit, self.api_key_toggle)
@@ -1953,6 +2008,9 @@ if _HAS_QT:
                 self.plain_badge_check,
                 self.badge_refresh_button,
                 self.open_switches_button,
+                self.local_language_combo,
+                self.apply_language_button,
+                self.open_models_button,
                 self.url_edit,
                 self.api_key_edit,
                 self.api_key_toggle,
@@ -1978,7 +2036,9 @@ if _HAS_QT:
                         button.setChecked(True)
             self.url_edit.setText(config.remote_url or "")
             self.model_edit.setText(config.remote_model or "")
-            index = self.language_combo.findData(config.language or "en")
+            index = self.language_combo.findData(
+                config.remote_language or config.language or "en"
+            )
             if index >= 0:
                 self.language_combo.setCurrentIndex(index)
             try:
@@ -2002,7 +2062,12 @@ if _HAS_QT:
             self.api_key_toggle.setText("隐藏" if shown else "显示")
 
         def _on_backend_changed(self, *_args) -> None:
-            remote = self._selected_backend() == "remote"
+            backend = self._selected_backend()
+            remote = backend == "remote"
+            self.remote_card.setVisible(remote)
+            self.local_card.setVisible(backend == "local")
+            self.apply_button.setText("应用外接 API" if remote else "应用后端")
+            self._update_backend_pending()
             for widget in (
                 self.url_edit,
                 self.api_key_edit,
@@ -2011,6 +2076,18 @@ if _HAS_QT:
                 self.language_combo,
             ):
                 widget.setEnabled(remote)
+            self._update_local_language_status()
+
+        def _update_backend_pending(self) -> None:
+            selected = self._selected_backend()
+            if selected == self._effective_backend:
+                self.backend_pending_label.hide()
+            else:
+                self.backend_pending_label.setText(
+                    f"尚未应用：当前仍为{backend_label(self._effective_backend)}。"
+                    "请点击下方的应用按钮。"
+                )
+                self.backend_pending_label.show()
 
         def _set_status(self, text: str) -> None:
             self.status_label.setText(text)
@@ -2018,6 +2095,63 @@ if _HAS_QT:
         def _go_to_switches(self) -> None:
             if self._open_switches is not None:
                 self._open_switches()
+
+        def _go_to_models(self) -> None:
+            if self._open_models is not None:
+                self._open_models()
+
+        def _show_local_result(self, state: str, message: str) -> None:
+            self.local_result.show()
+            _update_strip(self.local_result, state, message)
+
+        def _refresh_local_language(self) -> None:
+            from . import models_catalog
+
+            try:
+                rows = rime_settings.language_input_switches()
+                selected = next(
+                    (
+                        code for code in ("en", "ja", "es")
+                        if any(
+                            row["name"] == f"language_input_{code}" and row["value"]
+                            for row in rows
+                        )
+                    ),
+                    "en",
+                )
+                model_root = paths.model_root(paths.rime_user_dir())
+                installed = models_catalog.installed_ids(model_root)
+                self._local_coverage = models_catalog.route_coverage(installed)
+                previous = self.local_language_combo.blockSignals(True)
+                index = self.local_language_combo.findData(selected)
+                if index >= 0:
+                    self.local_language_combo.setCurrentIndex(index)
+                self.local_language_combo.blockSignals(previous)
+                self._update_local_language_status()
+            except Exception as exc:
+                self._local_coverage = {}
+                self.local_language_status.setText(f"本地语言状态不可用：{exc}")
+                self.apply_language_button.setEnabled(False)
+
+        def _update_local_language_status(self, *_args) -> None:
+            if not hasattr(self, "local_language_status"):
+                return
+            code = self.local_language_combo.currentData() or "en"
+            route = self._local_coverage.get(code) or {}
+            if not route.get("available"):
+                missing = "、".join(component_label(cid) for cid in route.get("missing", []))
+                message = f"{language_label(code)}模型未就绪"
+                if missing:
+                    message += f"：缺少 {missing}"
+                message += "。请先到「模型」页安装。"
+            elif self._effective_backend != "local":
+                message = "请先点击「应用后端」切换到本地模型。"
+            else:
+                message = f"{language_label(code)}模型已安装；切换会同步启用候选译注。"
+            self.local_language_status.setText(message)
+            self.apply_language_button.setEnabled(
+                bool(route.get("available")) and self._effective_backend == "local"
+            )
 
         def _refresh_switch_status(self, backend: str) -> None:
             try:
@@ -2037,7 +2171,17 @@ if _HAS_QT:
                 elif switches.get("language_input_model_m2m100") and backend == "local":
                     message = "方案选用 M2M100，冷请求实测超过 1 秒；请切换为 QuickMT。"
                 else:
-                    message = f"方案已启用 AI 译注，后端为{backend_label(backend)}。"
+                    target = next(
+                        (
+                            code for code in ("en", "ja", "es")
+                            if switches.get(f"language_input_{code}")
+                        ),
+                        "en",
+                    )
+                    message = (
+                        f"候选译注已开启；当前目标语言为{language_label(target)}，"
+                        f"后端为{backend_label(backend)}。"
+                    )
             except Exception as exc:
                 message = f"无法读取方案开关：{exc}"
             self.switch_status_label.setText(message)
@@ -2063,6 +2207,9 @@ if _HAS_QT:
                     remote = {}
                     source = "服务未运行，显示已保存配置"
                     server_env = {}
+                self._effective_backend = backend
+                self._refresh_local_language()
+                self._update_backend_pending()
 
                 model_root = paths.model_root(paths.rime_user_dir())
                 try:
@@ -2214,6 +2361,65 @@ if _HAS_QT:
 
         # -- actions --
 
+        def _on_apply_local_language(self) -> None:
+            code = self.local_language_combo.currentData() or "en"
+            if self._effective_backend != "local":
+                self._show_local_result("warning", "请先应用本地模型后端。")
+                return
+            if not (self._local_coverage.get(code) or {}).get("available"):
+                self._show_local_result("warning", "模型包未安装完整，请先到「模型」页安装。")
+                return
+            if (
+                QMessageBox.question(
+                    self,
+                    "切换本地目标语言",
+                    f"切换为{language_label(code)}，并启用候选译注与 QuickMT。\n\n"
+                    + _RESTART_WARNING,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
+            changes = {
+                f"language_input_{code}": True,
+                "language_input_gloss": True,
+                "language_input_ai": True,
+                "language_input_model_m2m100": False,
+            }
+            self._tx.run(
+                "正在切换本地目标语言并重新部署…",
+                rime_settings.set_switches,
+                changes=changes,
+                preserve_across_sessions=True,
+                on_success=lambda result: self._on_local_language_done(code, result),
+                on_error=self._on_local_language_error,
+            )
+
+        def _on_local_language_done(self, code: str, result: dict) -> None:
+            self._on_backend_changed()
+            self._refresh_status()
+            server_state = result.get("server") or {}
+            if server_state.get("was_running") and not server_state.get("restarted"):
+                message = server_state.get("restart_error") or "输入法服务未能重启"
+                self._show_local_result("error", f"设置已写入，但{message}。")
+            elif (result.get("changed") or result.get("patches_changed")) and not result.get("clean"):
+                deploy = result.get("deploy") or {}
+                self._show_local_result(
+                    "warning",
+                    f"设置已写入，但部署未验证成功（退出码 {deploy.get('exit_code')}）。",
+                )
+            else:
+                self._show_local_result(
+                    "success",
+                    f"本地目标语言已设为{language_label(code)}。请重新输入查看候选译注。",
+                )
+
+        def _on_local_language_error(self, message: str) -> None:
+            self._on_backend_changed()
+            self._refresh_local_language()
+            self._show_local_result("error", f"语言切换失败：{message}")
+
         def _on_test_endpoint(self) -> None:
             """One minimal request to the configured endpoint (off-thread).
 
@@ -2298,14 +2504,17 @@ if _HAS_QT:
                 )
                 return
 
-            summary = (
-                f"后端：{backend_label(backend)}\n"
-                f"端点：{url or '（不适用）'}\n"
-                f"模型：{model or '（不适用）'}\n"
-                f"目标语言：{language_label(language)}\n\n"
-                f"{_RESTART_WARNING}\n"
-                "并可能清除 AI 缓存。"
-            )
+            summary = f"后端：{backend_label(backend)}\n"
+            if backend == "remote":
+                summary += (
+                    f"端点：{url}\n模型：{model}\n"
+                    f"API 目标语言：{language_label(language)}\n"
+                )
+            elif backend == "local":
+                summary += "本地目标语言由上方「应用本地语言」单独切换。\n"
+            else:
+                summary += "AI 传输将关闭，词典译注仍可使用。\n"
+            summary += f"\n{_RESTART_WARNING}\n并可能清除 AI 缓存。"
             if (
                 QMessageBox.question(
                     self,
@@ -2321,13 +2530,14 @@ if _HAS_QT:
             try:
                 config = appconfig.load_config()
                 config.backend = backend
-                config.remote_url = url
-                config.remote_model = model
-                config.remote_language = language
-                config.language = language
-                config.api_key_dpapi = (
-                    appconfig.encrypt_secret(api_key) if api_key else None
-                )
+                if backend == "remote":
+                    config.remote_url = url
+                    config.remote_model = model
+                    config.remote_language = language
+                    config.language = language
+                    config.api_key_dpapi = (
+                        appconfig.encrypt_secret(api_key) if api_key else None
+                    )
             except Exception as exc:
                 _update_strip(self.apply_strip, "error", f"配置准备失败：{exc}")
                 QMessageBox.critical(self, "配置准备失败", str(exc))
@@ -2339,10 +2549,10 @@ if _HAS_QT:
                 "正在应用配置并重启输入法服务…",
                 server.apply_backend,
                 backend=backend,
-                url=url or None,
-                api_key=api_key or None,
-                model=model or None,
-                language=language or None,
+                url=(url or None) if backend == "remote" else None,
+                api_key=(api_key or None) if backend == "remote" else None,
+                model=(model or None) if backend == "remote" else None,
+                language=(language or None) if backend == "remote" else None,
                 on_success=lambda result: self._on_apply_done(backend, config, result),
                 on_error=self._on_apply_error,
             )
@@ -4063,6 +4273,7 @@ if _HAS_QT:
                     page = TranslationPage(
                         title, description,
                         open_switches=lambda: self.nav.setCurrentRow(5),
+                        open_models=lambda: self.nav.setCurrentRow(2),
                     )
                 elif key == "models":
                     page = ModelsPage(title, description)
@@ -4111,6 +4322,8 @@ if _HAS_QT:
             elif key == "translation" and page is not None:
                 page._refresh_status()
                 page._refresh_plain_badge()
+            elif key == "keys" and page is not None and not page.transaction_active():
+                page._refresh()
 
         def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
             if self._force_close:

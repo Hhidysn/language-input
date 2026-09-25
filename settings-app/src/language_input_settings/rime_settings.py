@@ -657,6 +657,7 @@ def set_switches(
     changes: dict[str, bool],
     *,
     deploy: bool = True,
+    preserve_across_sessions: bool = False,
     user_dir: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     """Atomically set one or more ``var/option/*`` switches, then redeploy.
@@ -667,7 +668,10 @@ def set_switches(
     The ``user.yaml`` write is a full stop → wait → atomic-write → restart
     transaction (:func:`server.server_stopped`), because the running server
     holds ``user.yaml`` with ``auto_save`` and rewrites the whole file.  A
-    no-op request (all saved values already match) does not touch the server.
+    A plain no-op request (all saved values already match) does not touch the
+    server; repairing a schema reset may still require deployment.
+    ``preserve_across_sessions`` also removes schema resets for saved options,
+    so a later Rime session cannot override the chosen language.
     """
     path = _user_yaml_path(user_dir)
     normalized: dict[str, bool] = {}
@@ -693,13 +697,41 @@ def set_switches(
         "action": "set_switches",
         "requested": normalized,
         "changed": [],
+        "patches_changed": [],
         "user_yaml": str(path),
         "options_after": read_switches(user_dir),
         "server": None,
         "deploy": None,
         "clean": None,
     }
+    if not pending and not preserve_across_sessions:
+        return result
+
+    def preserve_saved_resets() -> list[str]:
+        if not preserve_across_sessions:
+            return []
+        from . import schema_patch
+
+        changed: list[str] = []
+        directory = Path(user_dir) if user_dir is not None else None
+        for schema_id in LANGUAGE_SCHEMAS:
+            compiled = schema_patch.compiled_schema_path(schema_id, directory)
+            if not compiled.is_file():
+                continue
+            custom = schema_patch.custom_schema_path(schema_id, directory)
+            before = custom.read_bytes() if custom.is_file() else None
+            schema_patch.neutralize_resets(schema_id, directory)
+            after = custom.read_bytes() if custom.is_file() else None
+            if before != after:
+                changed.append(schema_id)
+        return changed
+
     if not pending:
+        result["patches_changed"] = preserve_saved_resets()
+        if deploy and result["patches_changed"]:
+            result["deploy"] = _deploy_dict()
+            result["clean"] = bool(result["deploy"]["clean"])
+            result["options_after"] = read_switches(user_dir)
         return result
 
     # B2: WeaselServer holds user.yaml with auto_save and rewrites the whole
@@ -712,6 +744,7 @@ def set_switches(
             if yaml_io.set_user_yaml_option(path, name, value):
                 changed_keys.append(name)
         result["changed"] = changed_keys
+        result["patches_changed"] = preserve_saved_resets()
 
     # ``server_stopped`` restarts the server on exit, so read its final state
     # *after* the ``with`` block (the yielded dict is mutated by the restart).
@@ -725,7 +758,7 @@ def set_switches(
     }
 
     result["options_after"] = read_switches(user_dir)
-    if deploy and result["changed"]:
+    if deploy and (result["changed"] or result["patches_changed"]):
         result["deploy"] = _deploy_dict()
         result["clean"] = bool(result["deploy"]["clean"])
         result["options_after"] = read_switches(user_dir)
