@@ -3071,7 +3071,8 @@ if _HAS_QT:
                     self,
                     "确认",
                     f"将写入 {display} 的自定义补丁并重新部署，移除 Language Input "
-                    "开关的显式重置，使所选选项可在重开会话后保持。\n\n"
+                    "已保存开关的显式重置，使所选选项可在重开会话后保持；"
+                    "未保存的开关继续使用方案默认值。\n\n"
                     f"{_RESTART_WARNING}",
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No,

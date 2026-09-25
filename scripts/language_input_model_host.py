@@ -559,6 +559,13 @@ def _load_installed_component_uncached(component_root: Path) -> dict[str, object
     if not component_root.is_dir() or component_root.is_symlink():
         raise ValueError("installed component root is invalid")
     record_path = component_root / "installed.json"
+    if record_path.is_symlink():
+        raise ValueError("installed component record is a link")
+    # A packaged Windows process may transparently redirect AppData children
+    # into LocalCache while the parent directory still resolves to AppData.
+    # Anchor containment to the physical manifest location so legitimate
+    # model files share one root, while links out of that root stay rejected.
+    physical_root = record_path.resolve(strict=True).parent
     record = json.loads(record_path.read_text(encoding="utf-8"))
     required = {"format", "component_id", "pack_size", "pack_sha256", "manifest"}
     if not isinstance(record, dict) or set(record) != required or record["format"] != INSTALL_FORMAT:
@@ -572,7 +579,7 @@ def _load_installed_component_uncached(component_root: Path) -> dict[str, object
             raise ValueError("installed component path is invalid")
         path = component_root.joinpath(*relative.parts)
         resolved = path.resolve(strict=True)
-        if path.is_symlink() or component_root not in resolved.parents:
+        if path.is_symlink() or physical_root not in resolved.parents:
             raise ValueError("installed component file escaped its root")
         if resolved.stat().st_size != row.get("size") or sha256_file(resolved) != row.get("sha256"):
             raise ValueError("installed component file failed verification")
@@ -1242,10 +1249,15 @@ class ModelHostHandler(BaseHTTPRequestHandler):
 
     def _json(self, status: int, document: object) -> None:
         body = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        # HTTPServer handles one client at a time. Close each HTTP/1.1
+        # connection so an idle keep-alive client cannot block all later
+        # translation requests.
+        self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 

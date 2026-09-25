@@ -51,7 +51,7 @@ def _new_map():
     return _CommentedMap()  # type: ignore[misc]
 
 from . import paths
-from .yaml_io import atomic_write_text, backup_file
+from .yaml_io import atomic_write_text, backup_file, read_user_yaml_options
 
 __all__ = [
     "SchemaPatchError",
@@ -136,6 +136,24 @@ def _switch_key(item: dict, index: int) -> str:
     if isinstance(options, (list, tuple)) and options:
         return "|".join(str(option) for option in options)
     return f"@switch{index}"
+
+
+def _has_saved_state(item: dict, saved: dict[str, bool]) -> bool:
+    """A reset can be removed only when a saved value can replace it."""
+    name = item.get("name")
+    if isinstance(name, str) and name.startswith(_SWITCH_PREFIX):
+        return name in saved
+    options = item.get("options")
+    if isinstance(options, (list, tuple)):
+        names = [
+            option for option in options
+            if isinstance(option, str) and option.startswith(_SWITCH_PREFIX)
+        ]
+        return bool(names) and (
+            any(saved.get(option) for option in names)
+            or all(option in saved for option in names)
+        )
+    return False
 
 
 def language_input_switch_indices(
@@ -232,29 +250,30 @@ def neutralize_resets(schema_id: str, user_dir: Path | None = None) -> Path:
     """Write/merge ``<schema>.custom.yaml`` to null the Language Input resets.
 
     Merges into any existing custom file without touching other keys and is
-    idempotent.  Only the switch entries that currently carry ``reset:`` are
-    patched.  Deployment is a separate step (the caller runs ``/deploy``).
+    idempotent.  Only switches with saved values lose their ``reset:``;
+    otherwise a fresh session would silently turn them off.  Previously
+    neutralized but unsaved switches regain their schema default.  Deployment
+    is a separate step (the caller runs ``/deploy``).
     """
     switches = _read_switches(schema_id, user_dir)
-    indices = [
-        index
-        for index, item in enumerate(switches)
-        if _is_language_input_switch(item) and "reset" in item
-    ]
     custom = custom_schema_path(schema_id, user_dir)
-    if not indices:
-        # Nothing to neutralize (already applied + deployed, or no resets).
-        return custom
+    saved = read_user_yaml_options(_user_dir(user_dir) / "user.yaml")
 
-    document, existed = _load_custom(custom)
+    document, _existed = _load_custom(custom)
     patch = _ensure_patch(document)
     changed = False
-    for index in indices:
+    for index, item in enumerate(switches):
+        if not _is_language_input_switch(item):
+            continue
         key = f"switches/@{index}/reset"
-        if patch.get(key, _MISSING) is not None:
-            patch[key] = None
+        if _has_saved_state(item, saved):
+            if "reset" in item and patch.get(key, _MISSING) is not None:
+                patch[key] = None
+                changed = True
+        elif key in patch and patch[key] is None:
+            del patch[key]
             changed = True
-    if changed or not existed:
+    if changed:
         backup_file(custom)
         _dump_custom(custom, document)
     return custom

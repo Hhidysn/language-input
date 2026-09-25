@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,7 @@ from scripts.language_input_model_host import (
     install_m2m100_pack,
     installed_m2m100_components,
     installed_components,
+    _load_installed_component_uncached,
     is_unsafe_source,
     load_m2m100_pack_catalog,
     load_pack_catalog,
@@ -239,6 +242,28 @@ class LanguageInputModelHostTests(unittest.TestCase):
             installed = install_pack(pack, catalog, models)
             self.assertEqual("fixture-en", installed["component_id"])
             self.assertEqual({"fixture-en"}, set(installed_components(models)))
+
+    def test_packaged_appdata_redirection_keeps_model_within_physical_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog, packs = self.make_three_pack_catalog(root)
+            models = root / "models"
+            install_pack(packs["en"][0], catalog, models)
+            logical = models / "fixture-en"
+            physical = root / "LocalCache" / "fixture-en"
+            shutil.copytree(logical, physical)
+            original_resolve = Path.resolve
+
+            def redirected_resolve(path: Path, strict: bool = False) -> Path:
+                if path == logical:
+                    return logical
+                if logical in path.parents:
+                    return original_resolve(physical / path.relative_to(logical), strict=strict)
+                return original_resolve(path, strict=strict)
+
+            with patch.object(Path, "resolve", redirected_resolve):
+                record = _load_installed_component_uncached(logical)
+            self.assertEqual("fixture-en", record["component_id"])
 
     def test_dependency_is_required_before_incremental_pack(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -463,6 +488,57 @@ class LanguageInputModelHostTests(unittest.TestCase):
                 process.wait(timeout=4)
                 self.assertEqual(0, process.returncode)
             finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=2)
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
+
+    def test_keepalive_client_does_not_block_next_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog, _ = self.make_three_pack_catalog(root)
+            token = "t" * 64
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__).parents[1] / "scripts" / "language_input_model_host.py"),
+                    "--serve", "--catalog", str(catalog),
+                    "--models", str(root / "models"),
+                    "--port", "0", "--token", token,
+                    "--idle-seconds", "3",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            first = second = None
+            try:
+                ready = process.stdout.readline().strip() if process.stdout else ""
+                self.assertRegex(ready, r"^READY \d+$")
+                port = int(ready.split()[1])
+                headers = {"Authorization": f"Bearer {token}"}
+                first = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
+                first.request("GET", "/health", headers=headers)
+                response = first.getresponse()
+                self.assertEqual(200, response.status)
+                response.read()
+
+                # Keep the first HTTP/1.1 client object alive. The host must
+                # still serve another client instead of waiting on that socket.
+                second = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
+                second.request("GET", "/health", headers=headers)
+                response = second.getresponse()
+                self.assertEqual(200, response.status)
+                response.read()
+            finally:
+                if first is not None:
+                    first.close()
+                if second is not None:
+                    second.close()
                 if process.poll() is None:
                     process.kill()
                     process.wait(timeout=2)
