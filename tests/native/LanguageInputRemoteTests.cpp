@@ -1,5 +1,7 @@
 #include <windows.h>
+#include <wincrypt.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -14,6 +16,8 @@
 #include <boost/json.hpp>
 
 #include "LanguageInputRemote.h"
+
+#pragma comment(lib, "crypt32.lib")
 
 namespace {
 
@@ -135,6 +139,80 @@ int wmain(int argc, wchar_t** argv) {
   std::error_code filesystem_error;
   std::filesystem::remove_all(test_root, filesystem_error);
   std::filesystem::create_directories(test_root);
+
+  // A saved backend must survive a server launch without inherited settings
+  // environment variables (the TSF recovery and login-start paths).
+  wchar_t old_appdata[32768] = {};
+  wchar_t old_enabled[128] = {};
+  const DWORD old_appdata_size = GetEnvironmentVariableW(
+      L"APPDATA", old_appdata, static_cast<DWORD>(std::size(old_appdata)));
+  const DWORD old_enabled_size = GetEnvironmentVariableW(
+      L"LANGUAGE_INPUT_REMOTE_ENABLED", old_enabled,
+      static_cast<DWORD>(std::size(old_enabled)));
+  const auto fake_appdata = test_root / L"appdata";
+  const auto settings_dir = fake_appdata / L"LanguageInput";
+  std::filesystem::create_directories(settings_dir);
+  SetEnvironmentVariableW(L"APPDATA", fake_appdata.c_str());
+  SetEnvironmentVariableW(L"LANGUAGE_INPUT_REMOTE_ENABLED", nullptr);
+  const auto startup_cache = test_root / L"startup-cache.json";
+  {
+    std::ofstream file(settings_dir / L"config.json", std::ios::binary);
+    file << R"({"backend":"off"})";
+  }
+  auto saved_off =
+      weasel::language_input::LoadRemoteGlossConfig(startup_cache);
+  Check(!saved_off.enabled && !saved_off.use_local_host,
+        "a saved off choice must disable AI after a fresh server start");
+
+  const std::string clear_key = "persisted-test-key";
+  DATA_BLOB clear_blob{static_cast<DWORD>(clear_key.size()),
+                       reinterpret_cast<BYTE*>(const_cast<char*>(clear_key.data()))};
+  DATA_BLOB encrypted_blob{};
+  if (CryptProtectData(&clear_blob, nullptr, nullptr, nullptr, nullptr,
+                       CRYPTPROTECT_UI_FORBIDDEN, &encrypted_blob)) {
+    DWORD encoded_size = 0;
+    CryptBinaryToStringA(encrypted_blob.pbData, encrypted_blob.cbData,
+                         CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, nullptr,
+                         &encoded_size);
+    std::string encoded(encoded_size, '\0');
+    if (CryptBinaryToStringA(encrypted_blob.pbData, encrypted_blob.cbData,
+                             CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF,
+                             encoded.data(), &encoded_size)) {
+      encoded.resize(encoded_size);
+      if (!encoded.empty() && encoded.back() == '\0')
+        encoded.pop_back();
+      boost::json::object settings;
+      settings["backend"] = "remote";
+      settings["remote_url"] = "https://example.invalid/v1/chat/completions";
+      settings["remote_model"] = "persisted-model";
+      settings["remote_language"] = "ja";
+      settings["api_key_dpapi"] = encoded;
+      std::ofstream file(settings_dir / L"config.json", std::ios::binary);
+      file << boost::json::serialize(settings);
+      file.close();
+      auto saved_remote =
+          weasel::language_input::LoadRemoteGlossConfig(startup_cache);
+      Check(saved_remote.enabled && !saved_remote.use_local_host &&
+                saved_remote.IsUsable() && saved_remote.api_key == clear_key &&
+                saved_remote.model == "persisted-model" &&
+                saved_remote.language == "ja",
+            "a saved remote choice and DPAPI key must survive a fresh start");
+      SetEnvironmentVariableW(L"LANGUAGE_INPUT_REMOTE_ENABLED", L"0");
+      auto overridden =
+          weasel::language_input::LoadRemoteGlossConfig(startup_cache);
+      Check(!overridden.enabled,
+            "an explicit environment override must take priority over settings");
+    } else {
+      Check(false, "DPAPI test key could not be base64-encoded");
+    }
+    LocalFree(encrypted_blob.pbData);
+  } else {
+    Check(false, "DPAPI test key could not be protected");
+  }
+  SetEnvironmentVariableW(L"APPDATA",
+                          old_appdata_size ? old_appdata : nullptr);
+  SetEnvironmentVariableW(L"LANGUAGE_INPUT_REMOTE_ENABLED",
+                          old_enabled_size ? old_enabled : nullptr);
 
   auto config = TestConfig(test_root / L"request-cache.json");
   std::string request = BuildRemoteGlossRequest(config, {u8"缺词", u8"新词"});
@@ -386,6 +464,53 @@ int wmain(int argc, wchar_t** argv) {
           "a dropped sensitive result must not write a cache file");
     Check(dropped_completions == 0,
           "a result invalidated by sensitive mode must not refresh the UI");
+  }
+
+  std::mutex queue_mutex;
+  std::condition_variable queue_gate;
+  bool first_started = false;
+  bool release_first = false;
+  std::vector<std::string> requested_words;
+  auto queued_transport = [&](const auto&, const std::vector<std::string>& words)
+      -> RemoteGlossTransportResult {
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      requested_words.insert(requested_words.end(), words.begin(), words.end());
+      if (words.front() == u8"首词") {
+        first_started = true;
+        queue_gate.notify_all();
+        queue_gate.wait(lock, [&] { return release_first; });
+      }
+    }
+    RemoteGlossMap glosses;
+    for (const auto& word : words)
+      glosses[word] = "gloss";
+    return {std::move(glosses), RemoteGlossError::kNone};
+  };
+  {
+    RemoteGlossService service(
+        TestConfig(test_root / L"latest" / L"cache.json"), queued_transport);
+    service.SetSessionSensitive(11, false);
+    service.QueueMissing(11, "en", {u8"首词"});
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      Check(queue_gate.wait_for(lock, 2s, [&] { return first_started; }),
+            "the first candidate page should start inference");
+    }
+    service.QueueMissing(11, "en", {u8"过期词"});
+    service.QueueMissing(11, "en", {u8"当前词"});
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex);
+      release_first = true;
+    }
+    queue_gate.notify_all();
+    Check(service.WaitUntilIdleForTesting(2s),
+          "the latest candidate page should finish");
+    Check(std::find(requested_words.begin(), requested_words.end(), u8"过期词") ==
+              requested_words.end(),
+          "a superseded candidate page must not reach the model");
+    Check(service.Lookup(11, "en", u8"当前词").has_value(),
+          "the latest candidate page should enter the cache");
   }
 
   std::filesystem::remove_all(test_root, filesystem_error);

@@ -10,8 +10,7 @@
 ## 效果
 
 输入拼音，候选栏每位候选后面跟一条目标语言释义（中→**英 / 日 / 西**）。
-**固定词典（CC-CEDICT，197,865 条）优先，词典查不到的词由本地小模型补上**；
-候选窗里**不显示任何来源标记**，干净地只有「中文 + 释义」。
+英语可以选**固定词典（CC-CEDICT，197,865 条）**或本地 QuickMT；日语和西班牙语使用 AI。两种来源不会自动互相回退。AI 释义在候选窗中只显示正文；词典释义默认带 `〔en·词〕` 标签，开启设置中的「简洁译注」后也只显示正文。下例使用简洁译注：
 
 ```
 da zi
@@ -71,7 +70,7 @@ git -C librime apply ../patches/librime-sensitive-mode.patch   # 2. 打引擎补
 
 - **引擎**：安装后由 TSF 自动挂载。模型宿主 `LanguageInputModelHost.exe` 由 `WeaselServer.exe`
   **按需拉起**，空闲 **600 秒**自动退出 —— **不需要常驻、不需要开机自启**。
-  实测延迟：热请求 ~30ms、冷启动后首次 ~1.7s（详见 `settings-app/docs/MODEL-HOST-LIFECYCLE.md`）。
+  QuickMT 热请求 9 候选 p95 为 39–207ms；首次冷请求仍可能超过 1 秒（详见 `language-input/MODEL.zh-CN.md`）。
 - **设置应用**：`settings-app\dist\LanguageInputSettings\LanguageInputSettings.exe`（托盘图标 → 设置窗口）
   - ⚠️ 首次运行 Windows 会把新托盘图标放进**溢出区**（点任务栏 `^` 才看得到），需手动拖到任务栏固定
   - 可选开机自启：`settings-app\packaging\autostart.ps1 -Enable`
@@ -97,7 +96,7 @@ git -C librime apply ../patches/librime-sensitive-mode.patch   # 2. 打引擎补
 [`settings-app/docs/2026-09-20-…-design.md`](settings-app/docs/) 的 §11 / §13。要点：
 
 - 模型**权重不在仓库**（每个约 400MB）；内网无外网时需手动导入 `.limodel`。
-- M2M100 路线的**权重未分发**，且本地缺少 byte-exact 的 `LICENSE.txt`/`NOTICE.txt`，因此当前不可安装。
+- M2M100 不随仓库分发；现有安装仍可兼容运行，但冷请求实测超过 1 秒，不作为打字场景推荐模型。
 - 设置应用里"从 HF 下载"的能力**已通过真实端到端验证**：下载 `quickmt-zh-en` 全部 409MB → 装进沙盒模型根 → 被冻结宿主接受 → 篡改一字节被拒绝。实测 **209 秒 / 409MB（≈2MB/s）**；链路抖动时靠**自动重试 + 断点续传**自愈（单次尝试会在 ~70MB 处断掉，这是修复前的实测行为）。
 - 设置界面中的"词频列表"是**有意不做**的（LevelDB 无法在纯 Python 下安全读取）。
 

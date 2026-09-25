@@ -35,6 +35,7 @@ import platform
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from . import __version__, appconfig, paths, rime_settings, yaml_io
@@ -115,7 +116,7 @@ _PAGE_ICONS = {
 # appears in a tooltip or a 详情 section.
 
 LANGUAGE_LABELS = {"en": "英语", "ja": "日语", "es": "西班牙语"}
-BACKEND_LABELS = {"local": "本地模型", "remote": "外接 API", "off": "关闭译注"}
+BACKEND_LABELS = {"local": "本地模型", "remote": "外接 API", "off": "关闭 AI 传输"}
 COMPONENT_LABELS = {
     "quickmt-zh-en": "英语·基础包",
     "quickmt-en-ja": "日语·增量包",
@@ -429,6 +430,29 @@ def acquire_single_instance(name: str = _SINGLE_INSTANCE_MUTEX) -> bool:
         return False
     _instance_handle = handle
     return True
+
+
+def show_existing_instance() -> bool:
+    """Bring the already-running settings window forward on a second launch."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    title = f"Language Input 设置  v{__version__}"
+    for _ in range(20):
+        handle = user32.FindWindowW(None, title)
+        if handle:
+            user32.ShowWindow(handle, 9)  # SW_RESTORE also shows a tray-hidden window.
+            user32.SetForegroundWindow(handle)
+            return True
+        time.sleep(0.1)
+    return False
 
 
 # --- read-only overview data ------------------------------------------------
@@ -989,31 +1013,11 @@ if _HAS_QT:
             layout.addWidget(_page_header(title, description))
 
             resolved = paths.resolve_paths()
-            backend, backend_source = self._backend_info()
-            models_installed, models_hint = self._models_info(resolved)
-            gloss_value, gloss_state, gloss_hint = self._gloss_info(resolved)
-            learn_value, learn_state, learn_hint = self._learning_info(resolved)
-            service_value, service_state, service_hint = self._service_info()
-
-            cards = [
-                (
-                    "翻译后端",
-                    backend,
-                    "success" if backend_source[1] else "neutral",
-                    f"{backend_source[0]}；更改请到「翻译」页。",
-                ),
-                (
-                    "本地模型",
-                    models_installed,
-                    "success" if models_installed != "未安装" else "warning",
-                    models_hint,
-                ),
-                ("译注显示", gloss_value, gloss_state, gloss_hint),
-                ("学习库", learn_value, learn_state, learn_hint),
-                ("服务状态", service_value, service_state, service_hint),
-            ]
-            for label, value, state, hint in cards:
-                layout.addWidget(_status_card(label, value, state, hint))
+            self._status_cards: dict[str, Card] = {}
+            for label, value, state, hint in self._card_values(resolved):
+                card = _status_card(label, value, state, hint)
+                self._status_cards[label] = card
+                layout.addWidget(card)
 
             details = CollapsibleSection("详情（路径与技术信息）")
             grid = QGridLayout()
@@ -1033,6 +1037,39 @@ if _HAS_QT:
             layout.addWidget(details)
             layout.addStretch(1)
 
+        def refresh(self) -> None:
+            for label, value, state, hint in self._card_values(paths.resolve_paths()):
+                card = self._status_cards[label]
+                card.value_label.setText(value)
+                card.hint_label.setText(hint)
+                card.state_dot.set_state(state)
+
+        @classmethod
+        def _card_values(cls, resolved: paths.PathResolution):
+            backend, backend_source = cls._backend_info()
+            models_installed, models_hint = cls._models_info(resolved)
+            gloss_value, gloss_state, gloss_hint = cls._gloss_info(resolved)
+            learn_value, learn_state, learn_hint = cls._learning_info(resolved)
+            service_value, service_state, service_hint = cls._service_info()
+
+            return [
+                (
+                    "AI 后端",
+                    backend,
+                    "success" if backend_source[1] else "neutral",
+                    f"{backend_source[0]}；AI 译注还需在「按键与开关」页启用。",
+                ),
+                (
+                    "本地模型",
+                    models_installed,
+                    "success" if models_installed != "未安装" else "warning",
+                    models_hint,
+                ),
+                ("译注显示", gloss_value, gloss_state, gloss_hint),
+                ("学习库", learn_value, learn_state, learn_hint),
+                ("服务状态", service_value, service_state, service_hint),
+            ]
+
         # -- data helpers --
 
         @staticmethod
@@ -1043,11 +1080,18 @@ if _HAS_QT:
                 running = server.running_pids()
                 server_env = server.read_server_env() if running else None
                 if server_env is not None:
-                    backend = env_config.describe_backend(server_env).value
-                    source = ("来自运行中的服务", True)
+                    backend = env_config.describe_effective_backend(
+                        server_env, appconfig.saved_backend()
+                    ).value
+                    source = (
+                        "来自运行中的服务"
+                        if env_config.effective_remote_config(server_env)["enabled"] is not None
+                        else "服务运行中，来自已保存配置",
+                        True,
+                    )
                 else:
-                    backend = env_config.current_process_backend().value
-                    source = ("服务未运行，显示本进程设置", backend not in ("off",))
+                    backend = appconfig.saved_backend() or "local"
+                    source = ("服务未运行，显示已保存配置", False)
             except Exception:
                 backend = None
                 source = ("状态不可用", False)
@@ -1073,8 +1117,12 @@ if _HAS_QT:
 
                 state = gloss_badge.plain_gloss_state(resolved.rime_user_dir)
                 active = bool(state.get("active"))
+                needs_update = bool(state.get("needs_update"))
             except Exception:
                 active = False
+                needs_update = False
+            if needs_update:
+                return "简洁译注", "warning", "旧版过滤器副本需要更新；到「翻译」页点击更新。"
             if active:
                 return "简洁译注", "success", "已隐藏候选窗中的语言 / 词性标签。"
             return "标准译注", "neutral", "候选窗保留语言标签；可在「翻译」页开启简洁译注。"
@@ -1120,17 +1168,20 @@ if _HAS_QT:
         name.setObjectName("CardLabel")
         top.addWidget(name)
         top.addStretch(1)
-        top.addWidget(StateDot(state), 0, Qt.AlignTop)
+        card.state_dot = StateDot(state)
+        top.addWidget(card.state_dot, 0, Qt.AlignTop)
         card.body.addLayout(top)
 
         value_label = QLabel(value)
         value_label.setObjectName("CardValue")
         value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        card.value_label = value_label
         card.body.addWidget(value_label)
 
         hint_label = QLabel(hint)
         hint_label.setObjectName("CardHint")
         hint_label.setWordWrap(True)
+        card.hint_label = hint_label
         card.body.addWidget(hint_label)
         return card
 
@@ -1170,7 +1221,7 @@ if _HAS_QT:
             action_card.body.addWidget(action_heading)
             action_card.body.addWidget(
                 _caption_label(
-                    "先在下方表格选择一行，再执行操作。下载与安装会写入模型目录；"
+                    "先在下方表格选择一行，再执行操作。下载并安装会自动处理依赖；"
                     "安装会重启输入法服务（期间无法打字）。"
                 )
             )
@@ -1181,7 +1232,7 @@ if _HAS_QT:
 
             button_row = QHBoxLayout()
             button_row.setSpacing(8)
-            self.download_button = QPushButton("下载")
+            self.download_button = QPushButton("下载并安装")
             self.download_button.setObjectName("PrimaryButton")
             self.download_button.clicked.connect(self._on_download)
             button_row.addWidget(self.download_button)
@@ -1340,17 +1391,12 @@ if _HAS_QT:
                 size_item.setToolTip(f"{size_value if size_value is not None else '-'} 字节")
                 self.table.setItem(row, 1, size_item)
 
-                chip = StateChip(
-                    "已安装" if is_installed else "未安装",
-                    "success" if is_installed else "neutral",
+                status_item = QTableWidgetItem("已安装" if is_installed else "未安装")
+                status_item.setTextAlignment(Qt.AlignCenter)
+                status_item.setForeground(
+                    QBrush(QColor("#146C2E" if is_installed else "#5A6672"))
                 )
-                cell = QWidget()
-                cell.setObjectName("CellBox")
-                cell_layout = QHBoxLayout(cell)
-                cell_layout.setContentsMargins(8, 0, 8, 0)
-                cell_layout.addWidget(chip)
-                cell_layout.addStretch(1)
-                self.table.setCellWidget(row, 2, cell)
+                self.table.setItem(row, 2, status_item)
 
                 languages = self._languages_for(component)
                 lang_item = QTableWidgetItem(languages)
@@ -1450,8 +1496,15 @@ if _HAS_QT:
         def _on_selection_changed(self, *_args) -> None:
             component_id = self._selected_id()
             has_selection = component_id is not None
-            self.download_button.setEnabled(has_selection)
-            self.install_dir_button.setEnabled(has_selection)
+            component = self._selected_component() if has_selection else None
+            can_download = bool(component and component.has_file_manifest)
+            self.download_button.setEnabled(can_download)
+            self.download_button.setToolTip(
+                "下载并安装会自动处理缺少的依赖。"
+                if can_download
+                else "此组件没有逐文件校验清单，请使用已验证的模型包安装。"
+            )
+            self.install_dir_button.setEnabled(can_download)
             self.install_pack_button.setEnabled(has_selection)
             self.verify_button.setEnabled(
                 bool(component_id) and self._is_installed(component_id)
@@ -1459,7 +1512,6 @@ if _HAS_QT:
             if not has_selection:
                 self.selection_label.setText("未选择组件")
                 return
-            component = self._selected_component()
             if component is None:
                 self.selection_label.setText("已选择组件（信息不可用）")
                 return
@@ -1482,22 +1534,35 @@ if _HAS_QT:
             if model_root is None:
                 _update_strip(self.action_strip, "warning", "无法解析模型目录。")
                 return
-            from . import models_catalog, models_download
+            from . import models_catalog, models_workflow
 
             sources = models_catalog.download_metadata()
-            dest = model_root / f".sources-{component.component_id}"
-            size_value = (
-                component.file_size
-                if component.file_size is not None
-                else component.runtime_bytes
+            components = models_catalog.load_components()
+            installed = set(models_catalog.installed_ids(model_root))
+            try:
+                plan = models_workflow.install_plan(
+                    component.component_id,
+                    components,
+                    installed,
+                    replace=self.replace_check.isChecked(),
+                )
+            except ValueError as exc:
+                _update_strip(self.action_strip, "error", str(exc))
+                return
+            if not plan:
+                _update_strip(self.action_strip, "neutral", "该组件已经安装；如需重装，请勾选替换选项。")
+                return
+            total_bytes = sum(
+                sum(item.size for item in components[cid].files) for cid in plan
             )
             label = component_label(component.component_id, component.display_name)
+            planned = "、".join(component_label(cid) for cid in plan)
             if (
                 QMessageBox.question(
                     self,
-                    "确认下载",
-                    f"从网络下载「{label}」（约 {format_size(size_value)}）到暂存目录？\n"
-                    "下载完成后可用「从目录安装…」安装该暂存目录。",
+                    "确认下载并安装",
+                    f"将下载、校验并安装：{planned}\n"
+                    f"合计约 {format_size(total_bytes)}。\n{_RESTART_WARNING}",
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No,
                 )
@@ -1505,17 +1570,14 @@ if _HAS_QT:
             ):
                 return
 
-            def _job(*, component, dest, sources):
-                return models_download.download_component(
-                    component, dest, sources=sources, progress=self._progress.report
-                )
-
             self._tx.run(
-                f"正在下载「{label}」…",
-                _job,
-                component=component,
-                dest=dest,
+                f"正在下载并安装「{label}」…",
+                models_workflow.download_and_install_component,
+                component_id=component.component_id,
+                model_root=model_root,
                 sources=sources,
+                replace=self.replace_check.isChecked(),
+                progress=self._progress.report,
                 determinate=True,
                 on_success=lambda result: self._on_download_done(label, result),
                 on_error=self._on_action_error,
@@ -1527,13 +1589,13 @@ if _HAS_QT:
                 _update_strip(
                     self.action_strip,
                     "error",
-                    f"「{label}」下载未完成：{result['error']}",
+                    f"「{label}」安装未完成：{result['error']}",
                 )
                 return
             _update_strip(
                 self.action_strip,
                 "success",
-                f"「{label}」已下载到暂存目录（{format_size(result.get('total_bytes'))}）。",
+                f"「{label}」及所需组件已下载、校验并安装（{format_size(result.get('total_bytes'))}）。",
             )
 
         def _confirm_install(self, component, action_label: str) -> bool:
@@ -1711,11 +1773,12 @@ if _HAS_QT:
         _BACKENDS = (
             ("local", "本地模型"),
             ("remote", "外接 API"),
-            ("off", "关闭译注"),
+            ("off", "关闭 AI 传输"),
         )
 
-        def __init__(self, title: str, description: str) -> None:
+        def __init__(self, title: str, description: str, open_switches=None) -> None:
             super().__init__()
+            self._open_switches = open_switches
             self.setObjectName("PageRoot")
             layout = QVBoxLayout(self)
             layout.setContentsMargins(24, 24, 24, 24)
@@ -1744,10 +1807,22 @@ if _HAS_QT:
             backend_card.body.addWidget(segmented)
             backend_card.body.addWidget(
                 _caption_label(
-                    "本地模型离线译注；外接 API 需要端点与密钥；关闭译注会关闭 AI 传输。"
+                    "本地模型离线译注；外接 API 需要端点与密钥；关闭 AI 传输不影响词典译注。"
                 )
             )
             layout.addWidget(backend_card)
+
+            backend_card.body.addWidget(_caption_label("方案译注开关（按已保存设置判断）"))
+            switch_row = QHBoxLayout()
+            switch_row.setSpacing(8)
+            self.switch_status_label = QLabel("")
+            self.switch_status_label.setObjectName("CardHint")
+            self.switch_status_label.setWordWrap(True)
+            switch_row.addWidget(self.switch_status_label, 1)
+            self.open_switches_button = QPushButton("打开按键与开关")
+            self.open_switches_button.clicked.connect(self._go_to_switches)
+            switch_row.addWidget(self.open_switches_button, 0, Qt.AlignTop)
+            backend_card.body.addLayout(switch_row)
 
             # -- remote API form + primary action --
             form_card = Card()
@@ -1819,8 +1894,8 @@ if _HAS_QT:
             self._badge_loading = False
             self.plain_badge_check = QCheckBox("简洁译注（隐藏候选窗语言标签）")
             self.plain_badge_check.setToolTip(
-                "在用户目录放置一份去掉语言标签的 gloss_filter.lua 影子副本并重新"
-                "部署，从而隐藏候选窗中的语言/词性标签。"
+                "通过用户目录中的轻量 Lua 包装文件隐藏词典语言标签，"
+                "并继续使用安装目录中的最新过滤器。"
             )
             self.plain_badge_check.toggled.connect(self._on_plain_badge_toggled)
             advanced.addWidget(self.plain_badge_check)
@@ -1834,7 +1909,7 @@ if _HAS_QT:
             self.badge_detail_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             advanced.addWidget(self.badge_detail_label)
             self.badge_refresh_button = QPushButton("刷新译注状态")
-            self.badge_refresh_button.clicked.connect(self._refresh_plain_badge)
+            self.badge_refresh_button.clicked.connect(self._on_badge_refresh)
             advanced.addWidget(self.badge_refresh_button)
             layout.addWidget(advanced)
 
@@ -1851,7 +1926,8 @@ if _HAS_QT:
             segmented_buttons = self._backend_buttons.buttons()
             for earlier, later in zip(segmented_buttons, segmented_buttons[1:]):
                 self.setTabOrder(earlier, later)
-            self.setTabOrder(segmented_buttons[-1], self.url_edit)
+            self.setTabOrder(segmented_buttons[-1], self.open_switches_button)
+            self.setTabOrder(self.open_switches_button, self.url_edit)
             self.setTabOrder(self.url_edit, self.api_key_edit)
             self.setTabOrder(self.api_key_edit, self.api_key_toggle)
             self.setTabOrder(self.api_key_toggle, self.model_edit)
@@ -1876,6 +1952,7 @@ if _HAS_QT:
                 self.test_button,
                 self.plain_badge_check,
                 self.badge_refresh_button,
+                self.open_switches_button,
                 self.url_edit,
                 self.api_key_edit,
                 self.api_key_toggle,
@@ -1938,6 +2015,33 @@ if _HAS_QT:
         def _set_status(self, text: str) -> None:
             self.status_label.setText(text)
 
+        def _go_to_switches(self) -> None:
+            if self._open_switches is not None:
+                self._open_switches()
+
+        def _refresh_switch_status(self, backend: str) -> None:
+            try:
+                rows = rime_settings.language_input_switches()
+                switches = {row["name"]: bool(row["value"]) for row in rows}
+                ai_enabled = (
+                    switches.get("language_input_ai")
+                    or switches.get("language_input_ja")
+                    or switches.get("language_input_es")
+                )
+                if not switches.get("language_input_gloss"):
+                    message = "译注总开关已关闭；选择后端不会让候选窗显示译注。"
+                elif not ai_enabled:
+                    message = "方案设为词典译注；如需使用本页 AI 后端，请在按键与开关中启用 AI 翻译。"
+                elif backend == "off":
+                    message = "方案已选择 AI，但 AI 传输已关闭；候选窗不会得到 AI 译注。"
+                elif switches.get("language_input_model_m2m100") and backend == "local":
+                    message = "方案选用 M2M100，冷请求实测超过 1 秒；请切换为 QuickMT。"
+                else:
+                    message = f"方案已启用 AI 译注，后端为{backend_label(backend)}。"
+            except Exception as exc:
+                message = f"无法读取方案开关：{exc}"
+            self.switch_status_label.setText(message)
+
         def _refresh_status(self) -> None:
             try:
                 from . import env_config, models_catalog, server
@@ -1945,13 +2049,19 @@ if _HAS_QT:
                 running = server.running_pids()
                 server_env = server.read_server_env() if running else None
                 if server_env is not None:
-                    backend = env_config.describe_backend(server_env).value
+                    backend = env_config.describe_effective_backend(
+                        server_env, appconfig.saved_backend()
+                    ).value
                     remote = env_config.effective_remote_config(server_env)
-                    source = "来自运行中的服务"
+                    source = (
+                        "来自运行中的服务"
+                        if remote["enabled"] is not None
+                        else "服务运行中，来自已保存配置"
+                    )
                 else:
-                    backend = env_config.current_process_backend().value
+                    backend = appconfig.saved_backend() or "local"
                     remote = {}
-                    source = "服务未运行，显示本进程设置"
+                    source = "服务未运行，显示已保存配置"
                     server_env = {}
 
                 model_root = paths.model_root(paths.rime_user_dir())
@@ -1965,6 +2075,7 @@ if _HAS_QT:
                     "success" if backend in ("local", "remote") else "neutral",
                     f"当前后端：{backend_label(backend)}（{source}）",
                 )
+                self._refresh_switch_status(backend)
 
                 lines = [
                     f"后端状态码：{backend}",
@@ -1972,7 +2083,7 @@ if _HAS_QT:
                     f"已安装模型（{len(installed)}）："
                     + ("、".join(component_label(cid) for cid in installed) or "无"),
                 ]
-                if server_env:
+                if server_env and remote.get("enabled") is not None:
                     lines.append(
                         "服务环境："
                         f"ENABLED={remote.get('enabled')!r}，"
@@ -1980,6 +2091,14 @@ if _HAS_QT:
                         f"MODEL={remote.get('model')!r}，"
                         f"LANGUAGE={remote.get('language')!r}，"
                         f"API_KEY={'已设置' if remote.get('has_api_key') else '未设置'}"
+                    )
+                elif server_env and backend == "remote":
+                    saved = appconfig.load_config()
+                    lines.append(
+                        "服务配置：已保存的外接 API；"
+                        f"URL={saved.remote_url!r}，MODEL={saved.remote_model!r}，"
+                        f"LANGUAGE={saved.remote_language or saved.language!r}，"
+                        f"API_KEY={'已保存' if saved.api_key_dpapi else '未保存'}"
                     )
                 self._set_status("\n".join(lines))
             except Exception as exc:  # pragma: no cover - defensive
@@ -1992,6 +2111,7 @@ if _HAS_QT:
             try:
                 state = gloss_badge.plain_gloss_state(paths.rime_user_dir())
             except Exception as exc:  # pragma: no cover - defensive
+                self._badge_needs_update = False
                 self._badge_loading = True
                 self.plain_badge_check.setChecked(False)
                 self._badge_loading = False
@@ -2000,11 +2120,18 @@ if _HAS_QT:
                 return
 
             active = bool(state["active"])
+            self._badge_needs_update = bool(state.get("needs_update"))
             self._badge_loading = True
             self.plain_badge_check.setChecked(active)
             self._badge_loading = False
             self.badge_status_label.setText(
-                "简洁译注：已开启（隐藏语言标签）" if active else "简洁译注：已关闭（显示语言标签）"
+                "简洁译注：旧版副本需更新，才能跟随内置过滤器升级"
+                if self._badge_needs_update
+                else "简洁译注：已开启（隐藏语言标签）"
+                if active else "简洁译注：已关闭（显示语言标签）"
+            )
+            self.badge_refresh_button.setText(
+                "更新简洁译注" if self._badge_needs_update else "刷新译注状态"
             )
             self.badge_detail_label.setText(
                 f"active={state['active']}  shadow_exists={state['shadow_exists']}  "
@@ -2014,6 +2141,24 @@ if _HAS_QT:
                 f"shadow sha256: {state['sha256'] or '（无）'}\n"
                 f"installed sha256: {state['installed_sha256'] or '（无）'}"
             )
+
+        def _on_badge_refresh(self) -> None:
+            if not getattr(self, "_badge_needs_update", False):
+                self._refresh_plain_badge()
+                return
+            from . import gloss_badge
+
+            self._tx.run(
+                "正在更新简洁译注并重新部署…",
+                gloss_badge.apply_plain_gloss,
+                deploy=True,
+                on_success=lambda result: self._on_plain_badge_done(True, result),
+                on_error=self._on_badge_refresh_error,
+            )
+
+        def _on_badge_refresh_error(self, message: str) -> None:
+            self._refresh_plain_badge()
+            QMessageBox.critical(self, "更新简洁译注失败", message)
 
         def _on_plain_badge_toggled(self, checked: bool) -> None:
             if self._badge_loading:
@@ -2113,8 +2258,13 @@ if _HAS_QT:
             latency_text = f"{latency} ms" if latency is not None else "-"
             if result.get("ok"):
                 text = f"端点连通正常（HTTP {result.get('status')}，用时 {latency_text}）。"
-                _update_strip(self.apply_strip, "success", text)
-                QMessageBox.information(self, "连通性测试", text)
+                if isinstance(latency, (int, float)) and latency > 1000:
+                    text += "本次已超过 1 秒，不适合即时打字；九候选请求可能更慢。"
+                    _update_strip(self.apply_strip, "warning", text)
+                    QMessageBox.warning(self, "连通性测试", text)
+                else:
+                    _update_strip(self.apply_strip, "success", text)
+                    QMessageBox.information(self, "连通性测试", text)
             else:
                 error = result.get("error") or "未知错误"
                 detail = (result.get("detail") or "").strip()
@@ -2139,12 +2289,12 @@ if _HAS_QT:
             model = self.model_edit.text().strip()
             language = self.language_combo.currentData() or self.language_combo.currentText()
 
-            if backend == "remote" and (not url or not api_key):
-                _update_strip(self.apply_strip, "error", "外接 API 需要端点 URL 与 API 密钥。")
+            if backend == "remote" and (not url or not api_key or not model):
+                _update_strip(self.apply_strip, "error", "外接 API 需要端点 URL、模型名与 API 密钥。")
                 QMessageBox.warning(
                     self,
                     "参数不足",
-                    "外接 API 需要端点 URL 与 API 密钥。",
+                    "外接 API 需要端点 URL、模型名与 API 密钥。",
                 )
                 return
 
@@ -2178,10 +2328,9 @@ if _HAS_QT:
                 config.api_key_dpapi = (
                     appconfig.encrypt_secret(api_key) if api_key else None
                 )
-                appconfig.save_config(config)
             except Exception as exc:
-                _update_strip(self.apply_strip, "error", f"配置保存失败：{exc}")
-                QMessageBox.critical(self, "配置保存失败", str(exc))
+                _update_strip(self.apply_strip, "error", f"配置准备失败：{exc}")
+                QMessageBox.critical(self, "配置准备失败", str(exc))
                 return
 
             from . import server
@@ -2194,11 +2343,19 @@ if _HAS_QT:
                 api_key=api_key or None,
                 model=model or None,
                 language=language or None,
-                on_success=lambda result: self._on_apply_done(backend, result),
+                on_success=lambda result: self._on_apply_done(backend, config, result),
                 on_error=self._on_apply_error,
             )
 
-        def _on_apply_done(self, backend: str, result: dict) -> None:
+        def _on_apply_done(self, backend: str, config, result: dict) -> None:
+            if result.get("ok"):
+                try:
+                    appconfig.save_config(config)
+                except Exception as exc:
+                    result["ok"] = False
+                    result.setdefault("errors", []).append(
+                        f"服务已切换，但持久配置保存失败：{exc}"
+                    )
             self._on_backend_changed()
             self._refresh_status()
             if result.get("ok"):
@@ -2705,9 +2862,29 @@ if _HAS_QT:
             self._initial.update(
                 {name: radio.isChecked() for name, radio in self._radios.items()}
             )
+            for radio in self._radios.values():
+                radio.toggled.connect(self._sync_ai_requirement)
+            self._sync_ai_requirement()
             _update_strip(self.strip, "neutral", "修改后点击「应用」写入并重新部署。")
             self._populate_hotkeys()
             self._loading = False
+
+        def _sync_ai_requirement(self, *_args) -> None:
+            ai_check = self._checkboxes.get("language_input_ai")
+            if ai_check is None:
+                return
+            requires_ai = any(
+                self._radios.get(name) is not None
+                and self._radios[name].isChecked()
+                for name in ("language_input_ja", "language_input_es")
+            )
+            if requires_ai:
+                ai_check.setChecked(True)
+                ai_check.setToolTip("日语和西班牙语需要 AI 翻译；切回英语后可关闭。")
+            else:
+                ai_check.setToolTip("英语可在词典与 AI 翻译之间选择。")
+            ai_check.setText("AI 翻译（日/西必需）" if requires_ai else "AI 翻译")
+            ai_check.setEnabled(not requires_ai)
 
         def _populate_hotkeys(self) -> None:
             try:
@@ -3623,7 +3800,10 @@ if _HAS_QT:
                 if key == "overview":
                     page: QWidget = OverviewPage(title, description)
                 elif key == "translation":
-                    page = TranslationPage(title, description)
+                    page = TranslationPage(
+                        title, description,
+                        open_switches=lambda: self.nav.setCurrentRow(5),
+                    )
                 elif key == "models":
                     page = ModelsPage(title, description)
                 elif key == "dictionary":
@@ -3637,7 +3817,7 @@ if _HAS_QT:
                 self.pages[key] = page
                 self.stack.addWidget(_scrollable(page))
 
-            self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+            self.nav.currentRowChanged.connect(self._on_page_changed)
             self.nav.setCurrentRow(0)
 
             bar = self.statusBar()
@@ -3659,6 +3839,18 @@ if _HAS_QT:
             right_layout.addWidget(self.status_dot)
             right_layout.addWidget(self.status_right)
             bar.addPermanentWidget(right)
+
+        def _on_page_changed(self, index: int) -> None:
+            self.stack.setCurrentIndex(index)
+            if index < 0 or index >= len(PAGE_SPECS):
+                return
+            key = PAGE_SPECS[index][0]
+            page = self.pages.get(key)
+            if key == "overview" and page is not None:
+                page.refresh()
+            elif key == "translation" and page is not None:
+                page._refresh_status()
+                page._refresh_plain_badge()
 
         def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
             if self._force_close:
@@ -3693,6 +3885,7 @@ if _HAS_QT:
             self._app = app
             self._notified = False
             self.window = MainWindow(on_hidden_to_tray=self._notify_hidden)
+            self.window.winId()  # Make a hidden tray window discoverable by a second launch.
 
             self.tray = QSystemTrayIcon(QIcon(str(icon_ico_path())), app)
             self.tray.setToolTip(_TRAY_TITLE)
@@ -3784,7 +3977,7 @@ def run_gui(*, start_minimized: bool = False) -> int:
         return 2
 
     if not acquire_single_instance():
-        print("language-input-settings is already running.", file=sys.stderr)
+        show_existing_instance()
         return 0
 
     app = QApplication([sys.argv[0]])

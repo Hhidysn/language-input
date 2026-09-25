@@ -23,6 +23,7 @@ __all__ = [
     "config_dir",
     "config_path",
     "load_config",
+    "saved_backend",
     "save_config",
     "encrypt_secret",
     "decrypt_secret",
@@ -44,7 +45,7 @@ class AppConfig:
 
     model_root_override: str | None = None
     api_key_dpapi: str | None = None
-    backend: str = "off"  # one of: local | remote | off
+    backend: str = "local"  # one of: local | remote | off
     remote_url: str = ""
     remote_model: str = ""
     remote_language: str = ""
@@ -71,7 +72,7 @@ class AppConfig:
     def normalise(self) -> None:
         """Clamp enumerated fields to their allowed values."""
         if self.backend not in _BACKENDS:
-            self.backend = "off"
+            self.backend = "local"
         if self.language not in _LANGUAGES:
             self.language = "en"
         if self.model_root_override is not None:
@@ -99,6 +100,22 @@ def load_config() -> AppConfig:
     except (OSError, ValueError):
         return AppConfig()
     return AppConfig.from_dict(data)
+
+
+def saved_backend() -> str | None:
+    """Read the saved choice; match the engine's fail-closed malformed-file rule."""
+    path = config_path()
+    if not path.is_file():
+        return None
+    try:
+        if path.stat().st_size > 64 * 1024:
+            return "off"
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "off"
+    if not isinstance(data, dict) or data.get("backend") not in _BACKENDS:
+        return "off"
+    return data["backend"]
 
 
 def save_config(config: AppConfig) -> Path:

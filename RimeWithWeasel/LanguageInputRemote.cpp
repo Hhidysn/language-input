@@ -5,6 +5,7 @@
 #include <boost/json.hpp>
 #include <boost/json/src.hpp>
 #include <bcrypt.h>
+#include <wincrypt.h>
 #include <winhttp.h>
 
 #include <algorithm>
@@ -22,6 +23,7 @@
 
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "crypt32.lib")
 
 namespace weasel::language_input {
 namespace {
@@ -95,6 +97,82 @@ std::optional<std::wstring> Utf8ToWide(std::string_view text) {
   if (converted != required)
     return std::nullopt;
   return result;
+}
+
+struct PersistedBackend {
+  std::string backend;
+  std::string endpoint;
+  std::string model;
+  std::string language;
+  std::string protected_key;
+};
+
+std::string ConfigString(const boost::json::object& object, const char* key) {
+  const auto* value = object.if_contains(key);
+  const auto* string = value ? value->if_string() : nullptr;
+  return string ? std::string(string->data(), string->size()) : std::string();
+}
+
+std::optional<PersistedBackend> ReadPersistedBackend() {
+  auto appdata = ReadEnvironment(L"APPDATA");
+  if (!appdata || appdata->empty())
+    return std::nullopt;
+  const auto path = std::filesystem::path(*appdata) / L"LanguageInput" /
+                    L"config.json";
+  std::error_code error;
+  if (!std::filesystem::exists(path, error))
+    return std::nullopt;
+  // An unreadable or malformed saved choice must not silently enable AI.
+  PersistedBackend disabled{"off"};
+  const auto size = std::filesystem::file_size(path, error);
+  if (error || size == 0 || size > 64 * 1024)
+    return disabled;
+  std::ifstream stream(path, std::ios::binary);
+  std::string bytes(static_cast<size_t>(size), '\0');
+  if (!stream || !stream.read(bytes.data(), static_cast<std::streamsize>(size)))
+    return disabled;
+  boost::system::error_code parse_error;
+  const auto document = boost::json::parse(bytes, parse_error);
+  const auto* object = parse_error ? nullptr : document.if_object();
+  if (!object)
+    return disabled;
+  PersistedBackend result;
+  result.backend = ConfigString(*object, "backend");
+  if (result.backend != "local" && result.backend != "remote" &&
+      result.backend != "off")
+    return disabled;
+  result.endpoint = ConfigString(*object, "remote_url");
+  result.model = ConfigString(*object, "remote_model");
+  result.language = ConfigString(*object, "remote_language");
+  if (result.language.empty())
+    result.language = ConfigString(*object, "language");
+  result.protected_key = ConfigString(*object, "api_key_dpapi");
+  return result;
+}
+
+std::optional<std::string> UnprotectKey(std::string_view encoded) {
+  if (encoded.empty() || encoded.size() > 16 * 1024)
+    return std::nullopt;
+  DWORD size = 0;
+  if (!CryptStringToBinaryA(encoded.data(), static_cast<DWORD>(encoded.size()),
+                            CRYPT_STRING_BASE64, nullptr, &size, nullptr,
+                            nullptr) ||
+      size == 0)
+    return std::nullopt;
+  std::vector<BYTE> protected_bytes(size);
+  if (!CryptStringToBinaryA(encoded.data(), static_cast<DWORD>(encoded.size()),
+                            CRYPT_STRING_BASE64, protected_bytes.data(), &size,
+                            nullptr, nullptr))
+    return std::nullopt;
+  DATA_BLOB input{size, protected_bytes.data()};
+  DATA_BLOB output{};
+  if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr,
+                          CRYPTPROTECT_UI_FORBIDDEN, &output))
+    return std::nullopt;
+  std::string key(reinterpret_cast<const char*>(output.pbData), output.cbData);
+  SecureZeroMemory(output.pbData, output.cbData);
+  LocalFree(output.pbData);
+  return key;
 }
 
 bool IsLanguageCode(std::string_view value) {
@@ -533,6 +611,28 @@ RemoteGlossConfig LoadRemoteGlossConfig(
   config.model = "quickmt-gloss-route-v2";
 
   auto enabled = ReadEnvironment(L"LANGUAGE_INPUT_REMOTE_ENABLED");
+  if (enabled && *enabled == L"local") {
+    config.enabled = std::filesystem::is_regular_file(
+                         config.local_host_executable) &&
+                     std::filesystem::is_regular_file(config.local_host_catalog);
+    config.use_local_host = config.enabled;
+    return config;
+  }
+  if (!enabled) {
+    auto saved = ReadPersistedBackend();
+    if (saved && saved->backend == "off")
+      return config;
+    if (saved && saved->backend == "remote") {
+      config.enabled = true;
+      config.use_local_host = false;
+      config.endpoint = std::move(saved->endpoint);
+      config.model = std::move(saved->model);
+      config.language = std::move(saved->language);
+      if (auto key = UnprotectKey(saved->protected_key))
+        config.api_key = std::move(*key);
+      return config;
+    }
+  }
   if (!enabled && std::filesystem::is_regular_file(config.local_host_executable) &&
       std::filesystem::is_regular_file(config.local_host_catalog)) {
     config.enabled = true;
@@ -719,6 +819,9 @@ class RemoteGlossService::Impl {
     if (!IsNormalSessionLocked(session_id))
       return;
     LoadCacheLocked();
+    // Candidate pages change on every keystroke. Keep only the newest queued
+    // page for this session so an obsolete page cannot delay its replacement.
+    PurgeQueuedJobsLocked(session_id);
     const auto now = std::chrono::steady_clock::now();
     Job job;
     job.session_id = session_id;
@@ -741,7 +844,7 @@ class RemoteGlossService::Impl {
     }
     if (job.words.empty())
       return;
-    jobs_.push_back(std::move(job));
+    jobs_.push_front(std::move(job));
     wake_.notify_one();
   }
 

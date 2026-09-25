@@ -340,7 +340,7 @@ def cmd_models_install_limodel(args) -> int:
 # --- translation backend / schema reset (M2) --------------------------------
 
 def cmd_backend_status(args) -> int:
-    from . import env_config, server
+    from . import appconfig, env_config, server
     from .models_catalog import installed_ids
 
     models_root = _model_root(args)
@@ -356,7 +356,9 @@ def cmd_backend_status(args) -> int:
             "server_running": bool(running),
             "server_pids": running,
             "server_backend": (
-                env_config.describe_backend(server_env).value
+                env_config.describe_effective_backend(
+                    server_env, appconfig.saved_backend()
+                ).value
                 if server_env is not None
                 else None
             ),
@@ -366,6 +368,7 @@ def cmd_backend_status(args) -> int:
                 else None
             ),
             "current_process_backend": env_config.current_process_backend().value,
+            "saved_backend": appconfig.saved_backend(),
             "model_root": str(models_root),
             "models_installed": installed_ids(models_root),
             "ai_cache": str(cache) if cache else None,
@@ -398,7 +401,14 @@ def cmd_set_backend(args) -> int:
     else:
         api_key = appconfig.decrypt_secret(config.api_key_dpapi)
 
-    appconfig.save_config(config)
+    if backend == "remote" and not (
+        config.remote_url and config.remote_model and api_key
+    ):
+        _print({
+            "ok": False,
+            "errors": ["remote requires URL, model, and API key"],
+        })
+        return 1
 
     result = server.apply_backend(
         backend,
@@ -407,6 +417,14 @@ def cmd_set_backend(args) -> int:
         model=config.remote_model or None,
         language=config.language or None,
     )
+    if result.get("ok"):
+        try:
+            appconfig.save_config(config)
+        except Exception as exc:
+            result["ok"] = False
+            result.setdefault("errors", []).append(
+                f"server switched but persistent config was not saved: {exc}"
+            )
     _print(result)
     return 0 if result.get("ok") else 1
 

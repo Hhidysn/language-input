@@ -4,9 +4,8 @@ A standalone **PySide6 (Qt for Python)** tray application for the
 **Language Input** project (the Weasel/Rime fork described in
 `docs/2026-09-20-language-input-settings-app-design.md`).
 
-This is the **M1 skeleton**: the tray icon, the settings window with seven
-placeholder pages, single-instance guarding, app-owned config, the deploy
-helper, and path resolution.  Feature pages arrive in later milestones.
+The tray app includes seven settings pages, model management, backend selection,
+single-instance guarding, app-owned config, deployment, and path resolution.
 
 > **GUI stack note (design doc §6 / decision #13).**  The original plan used
 > PySide6; a temporary pivot to **tkinter + pystray + Pillow** was made because
@@ -75,7 +74,22 @@ $env:PYTHONPATH = "src"
 Alternatively install it in editable mode (`pip install -e .`) and use the
 `language-input-settings` console script.
 
+## Translation backend
+
+The selected AI backend is saved in `%APPDATA%\LanguageInput\config.json`.
+Weasel reads it on startup, including starts after login or TSF recovery. An
+explicit `LANGUAGE_INPUT_REMOTE_ENABLED` environment variable overrides it:
+`local` selects the bundled host, `1` selects the external API, and `0`
+disables AI transport. The API key is stored with Windows DPAPI. Disabling AI
+transport does not disable dictionary glosses; the Rime AI switch is controlled
+on the **按键与开关** page.
+
 ## Model management (M3)
+
+In the GUI, **下载并安装** downloads and verifies the selected component and
+any missing dependencies, then installs them. All downloads finish before the
+input service is stopped for installation. The directory and `.limodel` actions
+remain available for offline and advanced installation.
 
 Model commands print JSON on stdout and download progress on stderr.  They
 accept `--model-root DIR` to override the resolved model root (the real one
@@ -110,41 +124,35 @@ Trust model:
   **without BOM** + LF (a BOM makes the host silently skip the component).
 * Replacing a component mirrors the host's backup/swap/rollback and recovers
   from a swap interrupted between the two renames.
-* Installation refuses to proceed while `WeaselServer.exe` or
-  `LanguageInputModelHost.exe` is running (the server's `Stop()` does not wait
-  for its child host process).
+* Installation stops `WeaselServer.exe`, waits for `LanguageInputModelHost.exe`
+  to exit, and restarts the service afterward if it was running.
 
 ## Plain gloss / 简洁译注 (hide the badge)
 
-The candidate window prepends a badge (``〔en·词〕 ``) to every gloss.  There is
-no Rime config key to hide just the badge, so the app shadows the shipped Lua
-filter with a copy whose marker assignment is empty:
+The English dictionary gloss prepends ``〔en·词〕`` by default; AI candidate
+glosses show only their text. There is no Rime config key to hide just the
+dictionary badge, so the app installs a small user-dir Lua wrapper that loads
+the shipped filter and clears the marker after initialization:
 
 ```powershell
 # Report the plain-gloss state (JSON)
 & .\.venv\Scripts\python.exe -m language_input_settings --gloss-badge status
 
-# Apply: hide the badge (writes a user-dir shadow copy + redeploys)
+# Apply: hide the dictionary badge (writes a small wrapper + redeploys)
 & .\.venv\Scripts\python.exe -m language_input_settings --gloss-badge plain
 
 # Revert: restore the shipped badge
 & .\.venv\Scripts\python.exe -m language_input_settings --gloss-badge fancy
 ```
 
-Mechanism: ``librime-lua`` resolves ``<user>\\lua\\?.lua`` **before**
-``<install>\\data\\lua\\?.lua``, so a copy at
-``<user_dir>\\lua\\language_input\\gloss_filter.lua`` shadows the installed
-filter with no admin rights and survives a reinstall.  Nothing under the
-installation directory is ever modified.  Lua modules are ``require``-cached
-per process, so ``/deploy`` (or a ``WeaselServer`` restart) is required before
-a new copy takes effect.
-
-> **Caveat — stale shadow copy.**  The shadow file is a **full copy** of the
-> shipped filter.  If a future product version changes
-> ``gloss_filter.lua``, this stale copy would **shadow** the new version, so
-> the change would not take effect until the user reverts (``--gloss-badge
-> fancy`` / uncheck the box on the 翻译 page).  The settings UI exposes the
-> revert for exactly this reason; keep it reachable.
+Mechanism: ``librime-lua`` resolves ``<user>\\lua\\?.lua`` before
+``<install>\\data\\lua\\?.lua``. The wrapper at
+``<user_dir>\\lua\\language_input\\gloss_filter.lua`` loads the installed
+filter by its shared-data path, then clears only its marker. Future installed
+filter updates therefore remain active. Nothing in the installation directory
+is modified. Lua modules are ``require``-cached, so ``/deploy`` is required.
+Older full-copy shadows are detected as needing an update; the 翻译 page offers
+an **更新简洁译注** action that replaces them with the wrapper and redeploys.
 
 ## Notes
 

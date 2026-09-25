@@ -111,7 +111,7 @@ SWITCH_ORDER: tuple[str, ...] = (
 SWITCH_LABELS: dict[str, str] = {
     "language_input_gloss": "总注释开关",
     "language_input_ai": "AI 翻译",
-    "language_input_model_m2m100": "多语直译模型（M2M100）",
+    "language_input_model_m2m100": "慢速实验模型（M2M100，冷请求超 1 秒）",
     "language_input_en": "目标语言：英语",
     "language_input_ja": "目标语言：日语",
     "language_input_es": "目标语言：西班牙语",

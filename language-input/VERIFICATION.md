@@ -33,14 +33,14 @@ part of this release.
 | Requirement | Automated evidence | Runtime evidence | Status |
 | --- | --- | --- | --- |
 | English, Japanese and Spanish `.limodel` packs | Whole-pack and per-file SHA256 audit; dependency and atomic-replace tests | Three real packs imported and all three routes produced glosses | Passed |
-| AI output stays distinct from the fixed dictionary | v2 cache tests isolate model and language; Rime option matrix covers dictionary/AI selection | Rime x64/Win32 matrix and installed native M2M100 smoke keep `[en·AI]` separate from dictionary output | Passed |
+| AI output stays distinct from the fixed dictionary | v2 cache tests isolate model and language; Rime option matrix covers dictionary/AI selection | Rime x64/Win32 matrix and installed native M2M100 smoke confirmed separate source paths; the candidate AI marker was later hidden intentionally | Passed |
 | AI never falls back to the fixed dictionary or QuickMT | Source-path review and missing-model behavior tests | Installed Host returned explicit `409 missing-model-component` for a missing M2M100 component, with no QuickMT response | Passed |
 | Local Host is loopback-only and authenticated | Host test verifies unauthorized 401, authorized health and idle exit | Installed loopback process returned 401 without a token, advertised `en,es,ja` with the token, and left no listener after exit | Passed |
 | Password/PIN has zero AI request, cache, display and speech | Native sensitive cancellation, late-result and no-callback tests | Final installed password/PIN controls | Pending |
 | AI completion refreshes the candidate UI | Native completion callback and main-thread state recheck tests | Native installed smoke refreshed the candidate result after M2M100 completed, without another key | Passed |
 | Host and installer are reproducible and signed | Pinned Host build script, bundle manifest and Authenticode audit | Installed first-party PE audit and signed 0.17.4.3 installer extraction | Passed |
 
-The three selected QuickMT packs are individually below 1–2 GB: 409,710,191 bytes (zh→en), 403,642,726 bytes (en→ja), and 403,609,399 bytes (en→es). Japanese and Spanish use an English pivot. Known short-word ambiguity is accepted for vocabulary hints and must remain visible through the `〔<lang>·AI〕` marker.
+The three selected QuickMT packs are individually below 1–2 GB: 409,710,191 bytes (zh→en), 403,642,726 bytes (en→ja), and 403,609,399 bytes (en→es). Japanese and Spanish use an English pivot. Known short-word ambiguity is documented as a limitation; the AI source marker is intentionally hidden in the candidate window.
 
 ## M2M100 418M optional backend evidence (2026-08-31, Asia/Shanghai)
 

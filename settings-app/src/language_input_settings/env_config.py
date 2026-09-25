@@ -4,14 +4,16 @@ The frozen ``WeaselServer.exe`` reads these variables **once, at process
 start** (design doc §5.2, ``LanguageInputRemote.cpp`` / ``RimeWithWeasel.cpp``).
 The semantics verified by the M0 probe are:
 
-* ``LANGUAGE_INPUT_REMOTE_ENABLED`` **absent** -> LOCAL (the bundled model host).
+* ``LANGUAGE_INPUT_REMOTE_ENABLED`` **absent** -> use the saved backend choice,
+  or LOCAL when no choice has been saved.
 * present with a truthy value (``1`` / ``true`` / ``yes`` / ``on``) -> REMOTE
   (also needs ``..._URL`` + ``..._API_KEY`` and a usable ``..._LANGUAGE``).
+* ``local`` -> LOCAL, explicitly overriding a saved backend choice.
 * present with any other value (``0`` / ``false`` / ...) -> AI transport
-  **disabled** (glossing entirely off) -- *not* local.
+  **disabled** (dictionary glosses are independent).
 
-Therefore "select local" means **removing** every ``LANGUAGE_INPUT_REMOTE_*``
-variable; a falsy value does *not* select local.
+Therefore "select local" sets the explicit ``local`` sentinel while clearing
+the other remote variables; a falsy value does *not* select local.
 
 Windows environment blocks are case-insensitive and the server matches the
 canonical upper-case spelling, so helpers here remove any case variant and
@@ -34,6 +36,7 @@ __all__ = [
     "TRUTHY_VALUES",
     "build_server_env",
     "describe_backend",
+    "describe_effective_backend",
     "current_process_backend",
     "effective_remote_config",
 ]
@@ -106,7 +109,7 @@ def build_server_env(
 ) -> dict[str, str]:
     """Return a copy of ``base_env`` with the backend env applied.
 
-    ``local`` deletes every ``LANGUAGE_INPUT_REMOTE_*`` variable; ``off`` sets
+    ``local`` sets ``..._ENABLED=local``; ``off`` sets
     ``..._ENABLED=0`` (and clears the rest); ``remote`` sets ``..._ENABLED=1``
     plus whichever of URL / API key / model / language were supplied.
 
@@ -118,6 +121,7 @@ def build_server_env(
 
     selected = _as_backend(backend)
     if selected is Backend.local:
+        _set(env, REMOTE_ENABLED, "local")
         return env
 
     if selected is Backend.off:
@@ -142,9 +146,22 @@ def describe_backend(env: dict[str, str]) -> Backend:
     if enabled_key is None:
         return Backend.local
     value = str(env.get(enabled_key, "")).strip().lower()
+    if value == "local":
+        return Backend.local
     if value in TRUTHY_VALUES:
         return Backend.remote
     return Backend.off
+
+
+def describe_effective_backend(
+    env: dict[str, str], persisted_backend: str | None = None
+) -> Backend:
+    """Match the server's environment override, then its saved backend choice."""
+    if _find_key(env, REMOTE_ENABLED) is not None:
+        return describe_backend(env)
+    if persisted_backend in (Backend.remote.value, Backend.off.value):
+        return Backend(persisted_backend)
+    return Backend.local
 
 
 def current_process_backend() -> Backend:

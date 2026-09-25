@@ -22,7 +22,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import env_config, paths, winproc
+from . import appconfig, env_config, paths, winproc
 
 __all__ = [
     "ServerError",
@@ -476,12 +476,23 @@ def clear_ai_cache(user_dir: Path | None = None) -> dict:
     }
 
 
-def _remote_snapshot(env: dict[str, str]) -> dict[str, str | bool | None]:
+def _remote_snapshot(
+    env: dict[str, str], *, include_saved: bool = False
+) -> dict[str, str | bool | None]:
     config = env_config.effective_remote_config(env)
+    saved_choice = (
+        appconfig.saved_backend()
+        if include_saved and config.get("enabled") is None
+        else None
+    )
+    saved = appconfig.load_config() if saved_choice == "remote" else None
+    backend = env_config.describe_effective_backend(
+        env, saved_choice
+    )
     return {
-        "backend": env_config.describe_backend(env).value,
-        "url": config.get("url"),
-        "model": config.get("model"),
+        "backend": backend.value,
+        "url": config.get("url") or (saved.remote_url if saved else None),
+        "model": config.get("model") or (saved.remote_model if saved else None),
     }
 
 
@@ -524,14 +535,13 @@ def apply_backend(
     )
     # Build ``expected`` from *every* remote variable, not only the ones present
     # in ``new_env``: a missing key is an expectation too ("must be absent").
-    # For the default ``local`` backend ``build_server_env`` deletes all of
-    # them, so the old "only present keys" dict was empty and the verification
-    # trivially matched even a stale remote server (B1).
+    # An absent key is an expectation too; checking only present keys could
+    # trivially match a stale server with different remote settings (B1).
     expected = {name: new_env.get(name) for name in env_config.REMOTE_VARS}
 
     before_running = is_running()
     before_env = read_server_env() if before_running else None
-    before = _remote_snapshot(before_env) if before_env is not None else None
+    before = _remote_snapshot(before_env, include_saved=True) if before_env is not None else None
     after = _remote_snapshot(new_env)
 
     result: dict = {

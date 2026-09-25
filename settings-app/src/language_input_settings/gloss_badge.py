@@ -5,9 +5,9 @@ the shipped Lua filter ``language_input/gloss_filter.lua`` by the single line::
 
     env.marker = "〔" .. env.language .. "·词〕 "
 
-There is **no** Rime configuration key that suppresses just this badge, so the
-only non-invasive way to hide it is to shadow the shipped Lua module with a
-copy whose ``env.marker`` assignment is empty.
+There is **no** Rime configuration key that suppresses just this badge, so a
+small user-dir Lua wrapper loads the current shipped filter and clears its
+``env.marker`` after initialization. It follows shipped filter updates.
 
 Why a *user-dir* copy shadows the installed one
 -----------------------------------------------
@@ -19,12 +19,8 @@ A copy at ``<user_dir>\\lua\\language_input\\gloss_filter.lua`` therefore wins
 without admin rights and survives a reinstall.  Nothing under the installation
 directory (``C:\\Program Files``) is ever touched by this module.
 
-Caveat
-------
-The shadow copy is a **full copy** of the shipped filter.  If a future product
-version changes ``gloss_filter.lua``, the stale shadow copy would silently
-shadow the new version until the user reverts.  Keep :func:`revert_plain_gloss`
-reachable from the UI/CLI.
+Earlier versions wrote a full copy of the filter. The state probe reports such
+copies as needing an update; applying plain gloss replaces them with the wrapper.
 
 Lua modules are ``require``-cached per process, so a deploy
 (``WeaselDeployer.exe /deploy``) and/or a ``WeaselServer`` restart is required
@@ -59,6 +55,21 @@ _INSTALLED_RELATIVE = Path("data") / "lua" / "language_input" / "gloss_filter.lu
 
 #: The exact replacement assignment written into the shadow copy.
 PLAIN_MARKER = 'env.marker = ""'
+
+# This wrapper always loads the installed module by its absolute shared-data
+# path, bypassing the user-dir package.path entry that resolves this wrapper.
+# Only the marker changes; future shipped filter fixes remain effective.
+_SHADOW_WRAPPER = '''-- Language Input plain-gloss wrapper; loads the installed filter.
+local source = rime_api.get_shared_data_dir() .. "/lua/language_input/gloss_filter.lua"
+local filter = assert(loadfile(source))()
+assert(type(filter) == "table" and type(filter.init) == "function")
+local original_init = filter.init
+function filter.init(env)
+  original_init(env)
+  env.marker = ""
+end
+return filter
+'''
 
 # Matches exactly one ``env.marker = <value>`` assignment line, tolerating
 # leading/trailing whitespace.  ``env.marker`` may not be followed by another
@@ -182,40 +193,24 @@ def _run_deploy() -> dict[str, Any]:
 
 
 def apply_plain_gloss(*, deploy: bool = True) -> dict[str, Any]:
-    """Install the badge-free shadow copy and redeploy.
-
-    Reads the **installed** filter (falling back to an existing shadow copy),
-    replaces only the ``env.marker`` assignment, writes the result to
-    ``<user_dir>\\lua\\language_input\\gloss_filter.lua`` (UTF-8 no BOM, LF,
-    atomic) and then runs ``/deploy``.
-    """
+    """Install a small badge-free wrapper around the shipped filter."""
     user_dir = paths.rime_user_dir()
     shadow = SHADOW_PATH(user_dir)
     installed = installed_filter_path()
 
-    source: Path | None = None
-    if installed is not None and installed.is_file():
-        source = installed
-    elif shadow.is_file():
-        source = shadow
-
-    if source is None:
+    if installed is None or not installed.is_file():
         raise GlossBadgeError(
-            "cannot locate the gloss filter: neither the installed copy "
-            f"({installed}) nor an existing shadow copy ({shadow}) exists"
+            f"cannot locate the installed gloss filter: {installed}"
         )
-
-    original = _read_text(source)
-    modified = marker_line_replacement(original)
-    written = _write_shadow(shadow, modified)
+    written = _write_shadow(shadow, _SHADOW_WRAPPER)
 
     result: dict[str, Any] = {
         "action": "plain",
         "user_dir": str(user_dir),
-        "source_path": str(source),
+        "source_path": str(installed),
         "installed_path": str(installed) if installed is not None else None,
         "installed_sha256": sha256_file(installed) if installed else None,
-        "marker_is_empty": marker_is_empty(modified),
+        "marker_is_empty": marker_is_empty(_SHADOW_WRAPPER),
         "deploy": None,
         "ok": False,
     }
@@ -312,4 +307,5 @@ def plain_gloss_state(user_dir: str | Path | None = None) -> dict[str, Any]:
         "sha256": shadow_sha,
         "installed_sha256": installed_sha,
         "active": bool(shadow_exists and marker_empty),
+        "needs_update": bool(shadow_exists and marker_empty and shadow_text != _SHADOW_WRAPPER),
     }
