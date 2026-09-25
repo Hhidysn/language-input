@@ -2848,11 +2848,13 @@ if _HAS_QT:
                 _update_strip(self.fuzzy_strip, "success", "搜狗模糊音已同步并重新部署。")
             else:
                 deployed = result.get("deploy") or {}
+                service = result.get("server") or {}
                 _update_strip(
                     self.fuzzy_strip,
                     "warning",
                     "规则已保存，但部署未验证成功："
-                    + (deployed.get("stderr") or deployed.get("note") or "请检查部署日志。"),
+                    + (service.get("restart_error") or deployed.get("stderr")
+                       or deployed.get("note") or "请检查部署日志。"),
                 )
 
         def _on_sync_fuzzy_error(self, message: str) -> None:

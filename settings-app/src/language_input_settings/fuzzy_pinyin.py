@@ -11,7 +11,7 @@ import configparser
 import re
 from pathlib import Path
 
-from . import paths, rime_settings, yaml_io
+from . import paths, rime_settings, server, yaml_io
 
 
 class FuzzyPinyinError(ValueError):
@@ -155,11 +155,35 @@ def sync_sogou_fuzzy(
         "changed": changed,
         "deploy": None,
         "clean": None,
+        "server": None,
     }
     if deploy:
         deployed = rime_settings.run_deploy()
         compiled = rime_settings._load_yaml(user / "build" / f"{SCHEMA_ID}.schema.yaml") or {}
         algebra = (compiled.get("speller") or {}).get("algebra") or []
+        prism = user / "build" / f"{SCHEMA_ID}.prism.bin"
         result["deploy"] = deployed
-        result["clean"] = bool(deployed["clean"] and algebra[:len(rules)] == rules)
+        result["clean"] = bool(
+            deployed["clean"]
+            and algebra[:len(rules)] == rules
+            and prism.is_file()
+            and prism.stat().st_size > 0
+        )
+        if result["clean"]:
+            # The old server can retain a stale prism mapping after /deploy.
+            # A fresh session then has no candidates even though the new file
+            # exists. Reload the running service after the compiler is done.
+            try:
+                with server.server_stopped() as state:
+                    pass
+                result["server"] = {
+                    "was_running": state["was_running"],
+                    "restarted": state["started"],
+                    "restart_error": state["start_error"],
+                }
+                if state["was_running"] and not state["started"]:
+                    result["clean"] = False
+            except server.ServerError as exc:
+                result["server"] = {"restart_error": str(exc)}
+                result["clean"] = False
     return result

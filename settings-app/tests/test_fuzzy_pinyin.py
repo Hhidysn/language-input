@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 from language_input_settings import fuzzy_pinyin, rime_settings
 
@@ -73,6 +75,42 @@ class FuzzyPinyinTests(unittest.TestCase):
             custom.write_text("patch:\n  speller:\n    algebra: []\n", encoding="utf-8")
             with self.assertRaises(fuzzy_pinyin.FuzzyPinyinError):
                 fuzzy_pinyin.sync_sogou_fuzzy(source=source, user_dir=user, deploy=False)
+
+    def test_deploy_restarts_running_server_after_prism_is_ready(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "Fuzzy.dat"
+            _sogou_file(source, "n=l")
+            user = root / "Rime"
+            build = user / "build"
+            build.mkdir(parents=True)
+            (build / "language_input_flypy.schema.yaml").write_text(
+                "speller:\n  algebra:\n    - derive/^n/l/\n    - derive/^l/n/\n",
+                encoding="utf-8",
+            )
+            (build / "language_input_flypy.prism.bin").write_bytes(b"prism")
+            events = []
+
+            def deploy():
+                events.append("deploy")
+                return {"clean": True}
+
+            @contextmanager
+            def restart():
+                events.append("stop")
+                state = {"was_running": True, "started": True, "start_error": None}
+                yield state
+                events.append("start")
+
+            with (
+                patch.object(fuzzy_pinyin.rime_settings, "run_deploy", deploy),
+                patch.object(fuzzy_pinyin.server, "server_stopped", restart),
+            ):
+                result = fuzzy_pinyin.sync_sogou_fuzzy(
+                    source=source, user_dir=user, deploy=True
+                )
+            self.assertTrue(result["clean"])
+            self.assertEqual(events, ["deploy", "stop", "start"])
 
 
 if __name__ == "__main__":
