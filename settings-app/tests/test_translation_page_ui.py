@@ -51,7 +51,6 @@ class TranslationPageUiTests(unittest.TestCase):
                 "language_input_es": True,
                 "language_input_gloss": True,
                 "language_input_ai": True,
-                "language_input_model_m2m100": False,
             },
             captured["changes"],
         )

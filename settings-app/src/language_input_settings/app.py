@@ -1102,7 +1102,11 @@ if _HAS_QT:
             try:
                 from . import models_catalog
 
-                ids = models_catalog.installed_ids(resolved.model_root)
+                components = models_catalog.load_components()
+                ids = [
+                    cid for cid in models_catalog.installed_ids(resolved.model_root)
+                    if cid in components and components[cid].backend == "quickmt"
+                ]
             except Exception:
                 ids = []
             if not ids:
@@ -1349,8 +1353,14 @@ if _HAS_QT:
 
             model_root = paths.model_root(paths.rime_user_dir())
             try:
-                components = models_catalog.load_components()
-                installed = set(models_catalog.installed_ids(model_root))
+                components = {
+                    cid: component
+                    for cid, component in models_catalog.load_components().items()
+                    if component.backend == "quickmt"
+                }
+                installed = (
+                    set(models_catalog.installed_ids(model_root)) & components.keys()
+                )
             except Exception as exc:  # pragma: no cover - defensive
                 components = {}
                 installed = set()
@@ -1414,46 +1424,35 @@ if _HAS_QT:
                 )
             self._detail_label.setText("\n".join(detail_lines) or "（无组件）")
 
-            self._reload_routes(models_catalog, installed, model_root)
+            self._reload_routes(models_catalog, installed)
             self._on_selection_changed()
 
         @staticmethod
         def _languages_for(component) -> str:
             if component.provides:
                 return "、".join(language_label(code) for code in component.provides)
-            if component.backend == "m2m100":
-                return "多语言直译"
             return "语言中转"
 
-        def _reload_routes(self, models_catalog, installed, model_root) -> None:
+        def _reload_routes(self, models_catalog, installed) -> None:
             while self._routes_grid.count():
                 item = self._routes_grid.takeAt(0)
                 widget = item.widget()
                 if widget is not None:
                     widget.deleteLater()
             try:
-                for column, backend in enumerate(("quickmt", "m2m100")):
-                    coverage = models_catalog.route_coverage(
-                        installed, root=None, backend=backend
+                coverage = models_catalog.route_coverage(
+                    installed, root=None, backend="quickmt"
+                )
+                for index, language in enumerate(models_catalog.SUPPORTED_LANGUAGES):
+                    info = coverage[language]
+                    text = (
+                        f"{language_label(language)}："
+                        + ("可用" if info["available"] else "缺少组件")
                     )
-                    backend_name = (
-                        "英语·基础包路线" if backend == "quickmt" else "多语直译路线"
+                    chip = StateChip(
+                        text, "success" if info["available"] else "neutral"
                     )
-                    label = QLabel(backend_name)
-                    label.setObjectName("DetailLabel")
-                    self._routes_grid.addWidget(label, 0, column, Qt.AlignTop)
-                    for index, language in enumerate(models_catalog.SUPPORTED_LANGUAGES):
-                        info = coverage[language]
-                        text = (
-                            f"{language_label(language)}："
-                            + ("可用" if info["available"] else "缺少组件")
-                        )
-                        chip = StateChip(
-                            text, "success" if info["available"] else "neutral"
-                        )
-                        self._routes_grid.addWidget(
-                            chip, index + 1, column, Qt.AlignLeft
-                        )
+                    self._routes_grid.addWidget(chip, index, 0, Qt.AlignLeft)
             except Exception:  # pragma: no cover - defensive
                 return
 
@@ -1693,7 +1692,7 @@ if _HAS_QT:
                 pack_path=pack,
                 model_root=model_root,
                 replace=self.replace_check.isChecked(),
-                m2m100=(component.backend == "m2m100"),
+                m2m100=False,
                 on_success=lambda result: self._on_install_done(label, result),
                 on_error=self._on_action_error,
             )
@@ -2168,8 +2167,6 @@ if _HAS_QT:
                     message = "方案设为词典译注；如需使用本页 AI 后端，请在按键与开关中启用 AI 翻译。"
                 elif backend == "off":
                     message = "方案已选择 AI，但 AI 传输已关闭；候选窗不会得到 AI 译注。"
-                elif switches.get("language_input_model_m2m100") and backend == "local":
-                    message = "方案选用 M2M100，冷请求实测超过 1 秒；请切换为 QuickMT。"
                 else:
                     target = next(
                         (
@@ -2385,7 +2382,6 @@ if _HAS_QT:
                 f"language_input_{code}": True,
                 "language_input_gloss": True,
                 "language_input_ai": True,
-                "language_input_model_m2m100": False,
             }
             self._tx.run(
                 "正在切换本地目标语言并重新部署…",

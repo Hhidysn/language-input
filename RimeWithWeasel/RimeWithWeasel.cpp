@@ -42,10 +42,8 @@ static std::string LanguageInputTargetLanguage(RimeSessionId session_id) {
   return "en";
 }
 
-static std::string LanguageInputModel(RimeSessionId session_id) {
-  return rime_api->get_option(session_id, "language_input_model_m2m100")
-             ? "m2m100-418m-int8"
-             : "quickmt-gloss-route-v2";
+static std::string LanguageInputModel() {
+  return "quickmt-gloss-route-v2";
 }
 
 static bool IsLanguageInputRefreshWindow(HWND window) {
@@ -387,7 +385,7 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
             rime_api->get_option(session_id, "language_input_ai")) {
           auto remote = m_remote_gloss->Lookup(
               session_id, LanguageInputTargetLanguage(session_id),
-              candidate.text, LanguageInputModel(session_id));
+              candidate.text, LanguageInputModel());
           if (remote)
             pending_speech = weasel::language_input::ParseGlossForSpeech(
                 remote->MarkedComment());
@@ -492,7 +490,7 @@ void RimeWithWeaselHandler::FocusIn(DWORD client_caps, WeaselSessionId ipc_id) {
       rime_api->get_option(session_id, "language_input_ai"))
     m_remote_gloss->PrepareLocalModel(
         session_id, LanguageInputTargetLanguage(session_id),
-        LanguageInputModel(session_id));
+        LanguageInputModel());
   if (sensitive)
     m_speech->Stop();
   _UpdateUI(ipc_id);
@@ -630,7 +628,7 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
       LanguageInputTargetLanguage(session_id);
   if (remote_enabled)
     m_remote_gloss->PrepareLocalModel(
-        session_id, target_language, LanguageInputModel(session_id));
+        session_id, target_language, LanguageInputModel());
   std::vector<std::string> remote_misses;
   for (int i = 0; i < ctx.menu.num_candidates; ++i) {
     const RimeCandidate& candidate = ctx.menu.candidates[i];
@@ -640,7 +638,7 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
         !weasel::language_input::ParseGlossForSpeech(comment)) {
       auto remote =
           m_remote_gloss->Lookup(session_id, target_language, candidate.text,
-                                 LanguageInputModel(session_id));
+                                 LanguageInputModel());
       if (remote) {
         if (!comment.empty())
           comment += "  ";
@@ -671,7 +669,7 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
   cinfo.is_last_page = ctx.menu.is_last_page;
   if (remote_enabled && !remote_misses.empty())
     m_remote_gloss->QueueMissing(session_id, target_language, remote_misses,
-                                 LanguageInputModel(session_id));
+                                 LanguageInputModel());
 }
 
 void RimeWithWeaselHandler::StartMaintenance() {
@@ -702,15 +700,9 @@ void RimeWithWeaselHandler::SetOption(WeaselSessionId ipc_id,
   } else {
     rime_api->set_option(to_session_id(ipc_id), opt.c_str(), val);
   }
-  if (opt == "language_input_model_m2m100") {
-    const RimeSessionId session_id =
-        to_session_id(ipc_id ? ipc_id : m_active_session);
-    m_remote_gloss->InvalidateSession(session_id);
-  }
   if (opt == "language_input_ai" || opt == "language_input_gloss" ||
       opt == "language_input_en" || opt == "language_input_ja" ||
-      opt == "language_input_es" ||
-      opt == "language_input_model_m2m100") {
+      opt == "language_input_es") {
     const RimeSessionId session_id =
         to_session_id(ipc_id ? ipc_id : m_active_session);
     if (session_id &&
@@ -719,7 +711,7 @@ void RimeWithWeaselHandler::SetOption(WeaselSessionId ipc_id,
         rime_api->get_option(session_id, "language_input_ai"))
       m_remote_gloss->PrepareLocalModel(
           session_id, LanguageInputTargetLanguage(session_id),
-          LanguageInputModel(session_id));
+          LanguageInputModel());
   }
 }
 

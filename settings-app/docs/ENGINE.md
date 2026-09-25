@@ -16,26 +16,26 @@
 | 用户数据 | `%APPDATA%\Rime`（可由 `HKCU\Software\Rime\Weasel\RimeUserDir` 重定向） |
 | 模型目录 | `<RimeUserDir>\language_input\models` |
 
-## 本次实测冻结的二进制哈希（SHA256）
+## 本次实测的二进制哈希（SHA256，2026-09-26）
 
 用于确认"这个设置应用对应的是哪一份引擎构建"。若这些哈希变化，说明引擎被重装/升级过，
 设置应用的行为假设可能需要重新验证。
 
 | 文件 | 字节数 | SHA256 |
 |---|---|---|
-| `WeaselServer.exe` | 2,833,408 | `16A4572A046D6C45AEB121EDA29FC466D26B3D649DC68EC845A5EB19F277F294` |
-| `weaselx64.dll` (TSF) | 1,068,544 | `6D330C17526E6FB21CF672009EF66311188933133653473DB29CC147D8EB7D57` |
+| `WeaselServer.exe` | 2,864,640 | `5DA0DA4CCA399864CCFEFF8D40B195172B2FA7B8E8D7DEF70EA722E557B52FF3` |
+| `weaselx64.dll` (TSF) | 1,068,544 | `899C1106E66E26211EA6E2EC4A6EBAA79E74A3E7A28D549DEEBEFDED3365D98E` |
 | `rime.dll` | 3,544,928 | `3D30310CAE8414880A4227A19451318975010846D9935B72D87B092A391B9CD9` |
-| `WeaselDeployer.exe` | 635,904 | `AB38EAEA412F503165F0D15286C328C8A4F68F4B65F2B59B2A28451698218250` |
-| `LanguageInputModelHost.exe` | 4,892,238 | `84148537A96C5AE0444217AAA53205D513DF1B21DDF90BB464C774A98D3001D8` |
+| `WeaselDeployer.exe` | 635,904 | `1AF8CC1C52E8FDC5DFE63A89680ECB8F0EB5C717EA47B5B31B7D9E2B06414704` |
+| `LanguageInputModelHost.exe` | 4,894,758 | `1D75392968CA31EA313AD6805FD624A08E54DE88AA5024A11A1D930CBA9E03C4` |
 
 ## 已实测确认的引擎行为（设置应用依赖这些）
 
-- `WeaselServer.exe` 确含 `LANGUAGE_INPUT_REMOTE_*`（UTF-16）与 `language_input_model_m2m100` /
-  `language_input_gloss` / `language_input_ai` 等选项（ASCII）。
+- `WeaselServer.exe` 确含 `LANGUAGE_INPUT_REMOTE_*`（UTF-16）与
+  `language_input_gloss` / `language_input_ai` 等选项（ASCII）；本地译注固定使用 QuickMT 路线。
 - `rime.dll` 含 `LuaTranslator` / `user_dictionary` / `Memory`，**不含** `octagram` / `predictor` /
   `predict_translator`（→ 语法模型与下一词预测需要重编 librime，本项目**不做**）。
-- 后端环境变量**仅在 WeaselServer 启动时读一次**；`absent` = 本地，真值 = 外接，假值 = 关闭译注。
+- 后端环境变量**仅在 WeaselServer 启动时读一次**；`absent` / `local` = 本地，真值 = 外接，假值 = 关闭译注。
 - `WeaselDeployer.exe /deploy` 在配置非法时**仍返回 0**（错误只在 stderr）。
 
 ## 引擎重建路径（如将来必须）

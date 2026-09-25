@@ -12,9 +12,6 @@ __patch:
       - name: language_input_ai
         reset: 0
         states: [ 翻译来源：词典, 翻译来源：AI ]
-      - name: language_input_model_m2m100
-        reset: 0
-        states: [ AI 模型：QuickMT, AI 模型：M2M100（冷请求超 1 秒） ]
       - options:
           - language_input_en
           - language_input_ja
@@ -31,7 +28,7 @@ __patch:
 schema:
   schema_id: language_input_pinyin
   name: 译注全拼
-  version: "0.2.0"
+  version: "0.2.1"
   author:
     - Language Input contributors
     - 佛振 <chen.sst@gmail.com> (朙月拼音)

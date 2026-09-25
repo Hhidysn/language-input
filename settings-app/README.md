@@ -109,7 +109,7 @@ lives under the live Rime user directory).
 & .\.venv\Scripts\python.exe -m language_input_settings --models-install-from-dir quickmt-zh-en --src <dir> [--replace]
 
 # Import an exact catalog .limodel via the frozen host
-& .\.venv\Scripts\python.exe -m language_input_settings --models-install-limodel <path.limodel> [--replace] [--m2m100]
+& .\.venv\Scripts\python.exe -m language_input_settings --models-install-limodel <path.limodel> [--replace]
 ```
 
 Trust model:
