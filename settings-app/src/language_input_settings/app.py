@@ -78,7 +78,7 @@ PAGE_SPECS = [
         "dictionary",
         "词库与记忆",
         "Dictionary & Memory",
-        "用户词典学习与常用词排序（不列出词频列表）。",
+        "用户词典学习、搜狗文本词库导入与维护。",
     ),
     (
         "appearance",
@@ -880,7 +880,7 @@ if _HAS_QT:
         def _on_finished(self, result: object) -> None:
             on_success, _on_error = self._callbacks or (None, None)
             self._callbacks = None
-            self._busy.stop()
+            self._active_busy.stop()
             self._set_controls(True)
             if callable(on_success):
                 on_success(result)
@@ -890,7 +890,7 @@ if _HAS_QT:
         def _on_failed(self, message: str) -> None:
             _on_success, on_error = self._callbacks or (None, None)
             self._callbacks = None
-            self._busy.stop()
+            self._active_busy.stop()
             self._set_controls(True)
             if callable(on_error):
                 on_error(message)
@@ -3101,7 +3101,7 @@ if _HAS_QT:
             QMessageBox.critical(self, "失败", f"{display}：{message}")
 
     class DictionaryPage(QWidget):
-        """词库与记忆 page: learning toggle, user-dictionary state, sync, /dict."""
+        """词库与记忆 page: learning, text import, sync, dictionary manager."""
 
         def __init__(self, title: str, description: str) -> None:
             super().__init__()
@@ -3160,6 +3160,42 @@ if _HAS_QT:
             learning_card.body.addWidget(self.learning_busy)
             layout.addWidget(learning_card)
 
+            import_card = Card()
+            import_heading = QLabel("导入搜狗个人词库")
+            import_heading.setObjectName("SectionHeading")
+            import_card.body.addWidget(import_heading)
+            import_card.body.addWidget(
+                _caption_label(
+                    "先在搜狗「属性设置 → 词库 → 词库管理」导出 TXT 文本词库。"
+                    "仅在本机读取文件，识别汉字词条后加入独立扩展词库；"
+                    "不会覆盖现有词库或学习记录。"
+                )
+            )
+            self.import_source = None
+            self.import_state_label = QLabel("尚未选择导出文件。")
+            self.import_state_label.setObjectName("DetailValue")
+            self.import_state_label.setWordWrap(True)
+            import_card.body.addWidget(self.import_state_label)
+            import_row = QHBoxLayout()
+            self.import_browse = QPushButton("选择 TXT 文件")
+            self.import_browse.clicked.connect(self._on_choose_export)
+            import_row.addWidget(self.import_browse)
+            import_row.addStretch(1)
+            self.import_apply = QPushButton("导入并部署")
+            self.import_apply.setObjectName("PrimaryButton")
+            self.import_apply.setEnabled(False)
+            self.import_apply.clicked.connect(self._on_import_export)
+            import_row.addWidget(self.import_apply)
+            import_card.body.addLayout(import_row)
+            self.import_strip = QLabel("")
+            self.import_strip.setObjectName("StatusStrip")
+            self.import_strip.setWordWrap(True)
+            import_card.body.addWidget(self.import_strip)
+            self.import_busy = BusyStrip()
+            import_card.body.addWidget(self.import_busy)
+            layout.addWidget(import_card)
+            _update_strip(self.import_strip, "neutral", "选择 TXT 文件后会先检查可导入的词条数量。")
+
             actions_card = Card()
             actions_heading = QLabel("维护")
             actions_heading.setObjectName("SectionHeading")
@@ -3215,6 +3251,8 @@ if _HAS_QT:
                 self.learning_apply,
                 self.sync_button,
                 self.dict_button,
+                self.import_browse,
+                self.import_apply,
             ]
 
         def transaction_active(self) -> bool:
@@ -3322,6 +3360,92 @@ if _HAS_QT:
             self._refresh()
             _update_strip(self.learning_strip, "error", f"学习设置失败：{message}")
             QMessageBox.critical(self, "学习设置失败", message)
+
+        def _on_choose_export(self) -> None:
+            from . import dictionary_import
+
+            source, _filter = QFileDialog.getOpenFileName(
+                self,
+                "选择搜狗导出的文本词库",
+                "",
+                "文本词库 (*.txt *.csv);;所有文件 (*)",
+            )
+            if not source:
+                return
+            self.import_source = None
+            self.import_apply.setEnabled(False)
+            self.import_state_label.setText("正在检查文件格式与词条数量…")
+            self._tx.run(
+                "正在检查导出文件…",
+                dictionary_import.preview_export,
+                source=source,
+                busy=self.import_busy,
+                on_success=self._on_preview_done,
+                on_error=self._on_preview_error,
+            )
+
+        def _on_preview_done(self, preview) -> None:
+            self.import_source = preview.source
+            self.import_apply.setEnabled(True)
+            self.import_state_label.setText(
+                f"可导入 {preview.entries} 条；跳过 {preview.skipped} 行；"
+                f"自动注音 {preview.generated_readings} 条。"
+            )
+            _update_strip(
+                self.import_strip,
+                "neutral",
+                f"编码：{preview.encoding}。确认数量后点击「导入并部署」。",
+            )
+
+        def _on_preview_error(self, message: str) -> None:
+            self.import_source = None
+            self.import_apply.setEnabled(False)
+            self.import_state_label.setText("文件无法作为词库导入。")
+            _update_strip(self.import_strip, "error", message)
+
+        def _on_import_export(self) -> None:
+            from . import dictionary_import
+
+            if not self.import_source:
+                return
+            if (
+                QMessageBox.question(
+                    self,
+                    "确认导入",
+                    "将识别到的词条加入独立扩展词库，并重新部署输入法。\n\n"
+                    + _RESTART_WARNING,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                != QMessageBox.Yes
+            ):
+                return
+            self._tx.run(
+                "正在导入词库并重新部署…",
+                dictionary_import.import_export,
+                source=self.import_source,
+                busy=self.import_busy,
+                on_success=self._on_import_done,
+                on_error=self._on_import_error,
+            )
+
+        def _on_import_done(self, result: dict) -> None:
+            self._refresh()
+            summary = f"新词 {result['added']} 条，扩展词库共 {result['total']} 条。"
+            if result.get("clean"):
+                _update_strip(self.import_strip, "success", "导入并部署完成；" + summary)
+            else:
+                deploy = result.get("deploy") or {}
+                _update_strip(
+                    self.import_strip,
+                    "warning",
+                    "已保存词库，但部署未验证成功；"
+                    + summary
+                    + f" 部署信息：{deploy.get('note') or '请检查部署日志。'}",
+                )
+
+        def _on_import_error(self, message: str) -> None:
+            _update_strip(self.import_strip, "error", f"导入未完成：{message}")
 
         def _on_sync(self) -> None:
             self._tx.run(

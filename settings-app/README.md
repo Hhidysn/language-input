@@ -154,9 +154,27 @@ is modified. Lua modules are ``require``-cached, so ``/deploy`` is required.
 Older full-copy shadows are detected as needing an update; the 翻译 page offers
 an **更新简洁译注** action that replaces them with the wrapper and redeploys.
 
+## Importing a Sogou personal word list
+
+In Sogou, open 属性设置 → 词库 → 词库管理 and export the **TXT text word list**.
+Then open Language Input 设置 → 词库与记忆 → 导入搜狗个人词库, choose the file,
+review the recognized/skipped counts, and click 导入并部署. Binary backups and
+`.scel` cell dictionaries are not accepted. The settings app reads the source
+locally and does not copy it into the repository.
+
+The importer accepts UTF-8, UTF-16 and GB18030 text with one Han word per line,
+or tab/comma-separated `word, pinyin, frequency` rows. Separated full-pinyin
+syllables are retained; missing or unusable readings are generated with
+`pypinyin`, so polyphonic names should be reviewed after import. Repeated
+imports merge by word and reading. The generated private file is
+`%APPDATA%\Rime\language_input_sogou.dict.yaml`; both Language Input schemas
+load it as a dictionary pack. Existing `luna_pinyin.userdb` learning data and
+the installed Luna Pinyin dictionary are preserved.
+
 ## Notes
 
-* Runtime dependencies are **PySide6-Essentials** and **ruamel.yaml** only.
+* Runtime dependencies are **PySide6-Essentials**, **ruamel.yaml**, and
+  **pypinyin** (used only while importing text word lists).
   `pystray`, `Pillow` and `tkinter` are **not** dependencies of this app.
 * `assets/icon.ico` is a **committed asset** (used by the tray icon via
   `QIcon` and by the installer).  It is never regenerated at runtime; no

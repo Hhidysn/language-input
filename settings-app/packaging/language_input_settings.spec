@@ -51,7 +51,7 @@ datas += [
 
 # ``ruamel.yaml`` selects its (optional) C extension and codecs lazily; collect
 # the whole subpackage so the pure-Python fallback is always present.
-hiddenimports = collect_submodules("ruamel.yaml")
+hiddenimports = collect_submodules("ruamel.yaml") + collect_submodules("pypinyin")
 
 # --- excluded modules -------------------------------------------------------
 # Keep the bundle lean: the app only uses QtCore/QtGui/QtWidgets/QtNetwork.
@@ -102,6 +102,18 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# This development host puts Poppler's ICU 78 DLL ahead of Windows' ICU DLL on
+# PATH. QtCore imports unversioned ICU symbols supplied by Windows; Poppler's
+# icuuc.dll exports versioned symbols and makes the frozen GUI fail to start.
+# Let Windows resolve its own ICU DLL instead of bundling the unrelated copy.
+a.binaries = [
+    item for item in a.binaries
+    if not (
+        Path(item[0]).name.lower() in {"icuuc.dll", "icudt78.dll"}
+        and "poppler" in str(item[1]).lower()
+    )
+]
 
 pyz = PYZ(a.pure)
 
