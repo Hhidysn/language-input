@@ -78,7 +78,7 @@ PAGE_SPECS = [
         "dictionary",
         "词库与记忆",
         "Dictionary & Memory",
-        "用户词典学习、搜狗文本词库导入与维护。",
+        "用户词典学习、其他输入法词库导入与维护。",
     ),
     (
         "appearance",
@@ -3101,7 +3101,7 @@ if _HAS_QT:
             QMessageBox.critical(self, "失败", f"{display}：{message}")
 
     class DictionaryPage(QWidget):
-        """词库与记忆 page: learning, text import, sync, dictionary manager."""
+        """词库与记忆 page: learning, local import, sync, dictionary manager."""
 
         def __init__(self, title: str, description: str) -> None:
             super().__init__()
@@ -3161,23 +3161,34 @@ if _HAS_QT:
             layout.addWidget(learning_card)
 
             import_card = Card()
-            import_heading = QLabel("导入搜狗个人词库")
+            import_heading = QLabel("导入其他输入法词库")
             import_heading.setObjectName("SectionHeading")
             import_card.body.addWidget(import_heading)
             import_card.body.addWidget(
                 _caption_label(
-                    "先在搜狗「属性设置 → 词库 → 词库管理」导出 TXT 文本词库。"
-                    "仅在本机读取文件，识别汉字词条后加入独立扩展词库；"
-                    "不会覆盖现有词库或学习记录。"
+                    "可直接选择检测到的搜狗或微软拼音本机词库；也可选择从搜狗词库网站"
+                    "下载的 .scel 文件，或导出的 TXT/CSV。词条仅在本机读取，"
+                    "加入独立扩展词库，不覆盖原输入法数据。"
                 )
             )
+            site_link = QLabel('<a href="https://pinyin.sogou.com/dict/">浏览搜狗细胞词库网站</a>')
+            site_link.setOpenExternalLinks(True)
+            site_link.setAccessibleName("浏览搜狗细胞词库网站")
+            import_card.body.addWidget(site_link)
             self.import_source = None
-            self.import_state_label = QLabel("尚未选择导出文件。")
+            self.import_state_label = QLabel("请选择导入来源。")
             self.import_state_label.setObjectName("DetailValue")
             self.import_state_label.setWordWrap(True)
             import_card.body.addWidget(self.import_state_label)
+            self.import_source_combo = QComboBox()
+            self.import_source_combo.setAccessibleName("其他输入法词库来源")
+            self.import_source_combo.currentIndexChanged.connect(self._on_import_source_changed)
+            import_card.body.addWidget(self.import_source_combo)
             import_row = QHBoxLayout()
-            self.import_browse = QPushButton("选择 TXT 文件")
+            self.import_scan = QPushButton("重新扫描本机")
+            self.import_scan.clicked.connect(self._scan_import_sources)
+            import_row.addWidget(self.import_scan)
+            self.import_browse = QPushButton("选择词库文件…")
             self.import_browse.clicked.connect(self._on_choose_export)
             import_row.addWidget(self.import_browse)
             import_row.addStretch(1)
@@ -3194,7 +3205,7 @@ if _HAS_QT:
             self.import_busy = BusyStrip()
             import_card.body.addWidget(self.import_busy)
             layout.addWidget(import_card)
-            _update_strip(self.import_strip, "neutral", "选择 TXT 文件后会先检查可导入的词条数量。")
+            _update_strip(self.import_strip, "neutral", "选择来源后会先检查可导入的词条数量。")
 
             actions_card = Card()
             actions_heading = QLabel("维护")
@@ -3241,6 +3252,7 @@ if _HAS_QT:
             self._tx = TransactionController(
                 self.learning_busy, self._interactive_controls, parent=self
             )
+            self._scan_import_sources()
 
         # -- off-thread transaction support --
 
@@ -3252,6 +3264,8 @@ if _HAS_QT:
                 self.sync_button,
                 self.dict_button,
                 self.import_browse,
+                self.import_scan,
+                self.import_source_combo,
                 self.import_apply,
             ]
 
@@ -3361,22 +3375,52 @@ if _HAS_QT:
             _update_strip(self.learning_strip, "error", f"学习设置失败：{message}")
             QMessageBox.critical(self, "学习设置失败", message)
 
-        def _on_choose_export(self) -> None:
+        def _scan_import_sources(self) -> None:
             from . import dictionary_import
 
+            self.import_source_combo.blockSignals(True)
+            self.import_source_combo.clear()
+            self.import_source_combo.addItem("选择本机输入法词库…", None)
+            for item in dictionary_import.discover_local_sources():
+                self.import_source_combo.addItem(item.label, item.path)
+                self.import_source_combo.setItemData(self.import_source_combo.count() - 1, item.detail, Qt.ToolTipRole)
+            self.import_source_combo.blockSignals(False)
+            self.import_source = None
+            self.import_apply.setEnabled(False)
+            self.import_state_label.setText("请选择检测到的来源，或点击「选择词库文件…」。")
+            count = self.import_source_combo.count() - 1
+            _update_strip(self.import_strip, "neutral", f"检测到 {count} 类可读取的本机词库。")
+
+        def _on_import_source_changed(self, _index: int) -> None:
+            source = self.import_source_combo.currentData()
+            if source:
+                self._preview_import_source(source)
+            else:
+                self.import_source = None
+                self.import_apply.setEnabled(False)
+
+        def _on_choose_export(self) -> None:
             source, _filter = QFileDialog.getOpenFileName(
                 self,
-                "选择搜狗导出的文本词库",
+                "选择输入法词库",
                 "",
-                "文本词库 (*.txt *.csv);;所有文件 (*)",
+                "可导入词库 (*.scel *.qcel *.txt *.csv *.bin *.dat);;所有文件 (*)",
             )
             if not source:
                 return
+            self.import_source_combo.blockSignals(True)
+            self.import_source_combo.setCurrentIndex(0)
+            self.import_source_combo.blockSignals(False)
+            self._preview_import_source(source)
+
+        def _preview_import_source(self, source: str) -> None:
+            from . import dictionary_import
+
             self.import_source = None
             self.import_apply.setEnabled(False)
             self.import_state_label.setText("正在检查文件格式与词条数量…")
             self._tx.run(
-                "正在检查导出文件…",
+                "正在检查词库…",
                 dictionary_import.preview_export,
                 source=source,
                 busy=self.import_busy,
@@ -3388,13 +3432,14 @@ if _HAS_QT:
             self.import_source = preview.source
             self.import_apply.setEnabled(True)
             self.import_state_label.setText(
-                f"可导入 {preview.entries} 条；跳过 {preview.skipped} 行；"
-                f"自动注音 {preview.generated_readings} 条。"
+                f"可导入 {preview.entries} 条（{preview.files} 个文件）；"
+                f"跳过 {preview.skipped} 条，自动注音 {preview.generated_readings} 条。"
             )
+            ignored = f"另有 {preview.ignored_files} 个格式不同的文件未读取。" if preview.ignored_files else ""
             _update_strip(
                 self.import_strip,
                 "neutral",
-                f"编码：{preview.encoding}。确认数量后点击「导入并部署」。",
+                f"格式：{preview.encoding}。{ignored}确认数量后点击「导入并部署」。",
             )
 
         def _on_preview_error(self, message: str) -> None:

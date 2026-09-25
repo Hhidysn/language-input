@@ -154,22 +154,35 @@ is modified. Lua modules are ``require``-cached, so ``/deploy`` is required.
 Older full-copy shadows are detected as needing an update; the 翻译 page offers
 an **更新简洁译注** action that replaces them with the wrapper and redeploys.
 
-## Importing a Sogou personal word list
+## Importing dictionaries from other input methods
 
-In Sogou, open 属性设置 → 词库 → 词库管理 and export the **TXT text word list**.
-Then open Language Input 设置 → 词库与记忆 → 导入搜狗个人词库, choose the file,
-review the recognized/skipped counts, and click 导入并部署. Binary backups and
-`.scel` cell dictionaries are not accepted. The settings app reads the source
-locally and does not copy it into the repository.
+Open Language Input 设置 → 词库与记忆 → 导入其他输入法词库. The source list
+detects the current Windows user's Sogou `sgim_gd_usr.bin` (SGPU v3), ordinary
+installed Sogou `.scel` cell dictionaries, and Microsoft Pinyin
+`ChsPinyinUDL.dat`. Select a source, review the recognized/skipped counts, then
+click 导入并部署. The installed-cell source imports all readable `.scel` files in
+Sogou's `scd` directory; special files with other headers are skipped and
+counted in the preview. Source files are read locally and never modified.
 
-The importer accepts UTF-8, UTF-16 and GB18030 text with one Han word per line,
+To import a cell dictionary from [Sogou's dictionary website](https://pinyin.sogou.com/dict/),
+download its `.scel` file, then click 选择词库文件 in settings. Sogou's TXT/CSV
+personal-word export is still accepted. Files can also be selected manually
+when stored outside the usual Windows profile path. Other binary formats,
+including `sgim_gd_usrbg.bin` and iFly's private cache, are not claimed as
+supported; export a text word list from those products if available.
+
+The text importer accepts UTF-8, UTF-16 and GB18030 with one Han word per line,
 or tab/comma-separated `word, pinyin, frequency` rows. Separated full-pinyin
 syllables are retained; missing or unusable readings are generated with
-`pypinyin`, so polyphonic names should be reviewed after import. Repeated
-imports merge by word and reading. The generated private file is
+`pypinyin`, so polyphonic names should be reviewed after import. SCEL, SGPU and
+Microsoft UDL preserve their stored readings. Repeated imports merge by word
+and reading. The generated private file is
 `%APPDATA%\Rime\language_input_sogou.dict.yaml`; both Language Input schemas
 load it as a dictionary pack. Existing `luna_pinyin.userdb` learning data and
 the installed Luna Pinyin dictionary are preserved.
+
+The binary format readers and pinyin index tables are based on
+[rose v2.1.2](https://github.com/nopdan/rose/tree/v2.1.2), licensed GPL-3.0.
 
 ## Notes
 
