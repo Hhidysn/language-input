@@ -109,7 +109,6 @@ $defaultText = $pageSizePattern.Replace($defaultText, '${1} 9', 1)
 $desiredSavedOptions = @(
   'language_input_gloss'
   'language_input_ai'
-  'language_input_model_m2m100'
   'language_input_en'
   'language_input_ja'
   'language_input_es'
@@ -129,7 +128,9 @@ $existingSavedOptions = @(
   ) | ForEach-Object { $_.Groups[1].Value.Trim() }
 )
 $otherSavedOptions = @(
-  $existingSavedOptions | Where-Object { $_ -notin $desiredSavedOptions }
+  $existingSavedOptions | Where-Object {
+    $_ -notin $desiredSavedOptions -and $_ -ne 'language_input_model_m2m100'
+  }
 )
 $orderedSavedOptions = @($desiredSavedOptions + $otherSavedOptions)
 $savedOptionsBlock = '  save_options:' + $newline +

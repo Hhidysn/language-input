@@ -1,7 +1,7 @@
 # 仓库结构
 
 这是**产品仓**：个人 fork `Hhidysn/weasel` 的引擎改动 + 自研 Windows 设置应用。
-分支 `language-input-settings`，基点 = fork 提交 `a57d7f0`（基于上游 `rime/weasel` tag `0.17.4`）。
+当前主分支为 `main`，引擎 fork 基点 = 提交 `a57d7f0`（基于上游 `rime/weasel` tag `0.17.4`）。
 
 > 产品说明与效果 → [`README.md`](README.md)　|　**归属与许可（哪些是我们的、哪些是开源的）** → [`ATTRIBUTION.md`](ATTRIBUTION.md)
 > 上游 Weasel 的原始说明 → [`README-weasel.md`](README-weasel.md)
@@ -26,7 +26,7 @@
 3. 构建引擎 —— 需要 **Visual Studio + CMake + Boost**（`build.bat` / `xbuild.bat`）
 4. 重建模型宿主 —— `tools/model-host/build.ps1`（直接从树内 `scripts/language_input_model_host.py` 构建）
 5. 打包设置应用 —— `settings-app/packaging/build.ps1`
-6. 一键编排 —— `tools/build-all.ps1`
+6. 单包安装程序 —— `scripts/package_release.ps1 -Version <版本号>`；GitHub Actions 见 `.github/workflows/release-ci.yml`
 
 > “clone 就能编译”指的是**源码齐全、步骤明确**；引擎构建仍然需要上述工具链。
 

@@ -33,6 +33,8 @@ compile_commands.json
 /output/data/lua/language_input/
 /output/data/licenses/language-input/
 /output/archives
+/output/settings/
+/output/settings.manifest.json
 /include/glog
 /include/rime*.h
 /ipch

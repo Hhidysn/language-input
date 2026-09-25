@@ -49,17 +49,21 @@ langInput/
 └─ third-party/ · deps/ · output/ · msbuild/   （已忽略：本地/构建产物）
 ```
 
-## 构建
+## 下载与构建
+
+GitHub Actions 的 [Package Language Input](.github/workflows/release-ci.yml) 可以手动运行：在仓库的 Actions 页选择该工作流，点 **Run workflow** 并选 `main`。完成后从该次运行的 **Artifacts** 下载 `LanguageInput-…-Windows`；里面有单个安装程序、SHA256 校验和及说明。创建并推送 `v1.0.0` 这类标签会自动构建，并建立待审核的 GitHub Release 草稿；确认安装包后再发布草稿。
+
+**一个安装包包含小狼毫输入法、按需启动的本地翻译宿主和设置应用。** 设置应用在开始菜单中有入口，安装时也可选择是否让它开机最小化到托盘。QuickMT 模型权重不在安装包里，安装后从设置界面下载或导入。
 
 **引擎**需要 Visual Studio（C++ 桌面）+ CMake + Boost；**模型宿主/设置应用**需要 Python 3.11。
 
 ```powershell
 git clone --recursive <repo>                       # 1. 取 librime / plum 子模块
 git -C librime apply ../patches/librime-sensitive-mode.patch   # 2. 打引擎补丁
-.\build.bat weasel                                 # 3. 构建引擎（或 msbuild weasel.sln /p:Platform=x64）
+.\build.bat release rime data opencc weasel        # 3. 构建完整引擎和数据
 .\tools\model-host\build.ps1                       # 4. 重建模型宿主
 .\settings-app\packaging\build.ps1                 # 5. 打包设置应用
-.\tools\build-all.ps1                              # 6. 一键编排（含 TODO：合并安装包）
+.\scripts\package_release.ps1 -Version 0.1.0      # 6. 暂存组件并生成同一个安装包
 ```
 
 > “clone 就能编译”指**源码齐全、步骤明确**；引擎构建仍需要上述工具链。
@@ -71,7 +75,7 @@ git -C librime apply ../patches/librime-sensitive-mode.patch   # 2. 打引擎补
 - **引擎**：安装后由 TSF 自动挂载。模型宿主 `LanguageInputModelHost.exe` 由 `WeaselServer.exe`
   **按需拉起**，空闲 **600 秒**自动退出 —— **不需要常驻、不需要开机自启**。
   QuickMT 热请求 9 候选 p95 为 39–207ms；首次冷请求仍可能超过 1 秒（详见 `language-input/MODEL.zh-CN.md`）。
-- **设置应用**：`settings-app\dist\LanguageInputSettings\LanguageInputSettings.exe`（托盘图标 → 设置窗口）
+- **设置应用**：安装包中的 `settings\LanguageInputSettings.exe`（开始菜单，或托盘图标 → 设置窗口）
   - ⚠️ 首次运行 Windows 会把新托盘图标放进**溢出区**（点任务栏 `^` 才看得到），需手动拖到任务栏固定
   - 可选开机自启：`settings-app\packaging\autostart.ps1 -Enable`
 - **引擎二进制替换**（改了 C++ 之后）：`tools\engine\apply-weaselserver.ps1`（备份 + 提权替换 + 重启）
