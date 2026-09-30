@@ -138,12 +138,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not install settings dependencies.' }
           & $python -m pip check
           if ($LASTEXITCODE -ne 0) { throw 'Settings dependency conflict.' }
+          & $python -m unittest discover -s settings-app\tests -p test_settings_startup.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Settings startup regression tests failed.' }
           & .\settings-app\packaging\build.ps1
           if (-not (Test-Path -LiteralPath 'settings-app\dist\LanguageInputSettings\LanguageInputSettings.exe' -PathType Leaf)) {
             throw 'Settings executable was not built.'
           }
           & $python -m language_input_settings --gui-smoke
           if ($LASTEXITCODE -ne 0) { throw 'Settings GUI smoke check failed.' }
+          $settingsExe = (Resolve-Path 'settings-app\dist\LanguageInputSettings\LanguageInputSettings.exe').Path
+          $smoke = Start-Process -FilePath $settingsExe -ArgumentList '--gui-smoke' -WindowStyle Hidden -PassThru
+          if (-not $smoke.WaitForExit(60000)) {
+            $smoke.Kill()
+            throw 'Packaged settings GUI smoke check timed out.'
+          }
+          if ($smoke.ExitCode -ne 0) { throw "Packaged settings GUI smoke check failed: $($smoke.ExitCode)" }
 
       - name: Stage and create single installer
         shell: pwsh

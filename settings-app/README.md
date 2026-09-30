@@ -209,9 +209,10 @@ instead of silently changing their meaning.
   `ruamel.yaml`; it never creates a `QApplication` and reports whether PySide6
   / ruamel.yaml are importable (with `pyside6_version` and `qt_version`)
   without failing when they are not.
-* `--gui-smoke` creates a `QApplication`, builds the window, all seven pages
-  and the tray icon, processes pending events, then tears everything down
-  without entering the event loop, and prints `gui_smoke: passed`.
+* `--gui-smoke` creates a `QApplication`, builds all seven pages and the tray
+  icon, checks minimized startup and explicit window opening, then tears
+  everything down without entering the event loop. It prints `gui_smoke: passed`.
+  The release workflow runs this check with both Python and the packaged EXE.
 * The deploy helper never blocks forever and documents explicitly that
   **exit code 0 does not mean the configuration was valid**
   (`Configurator.cpp` ignores `rime->deploy()`'s return value); callers must
@@ -275,9 +276,10 @@ settings-app\dist\LanguageInputSettings\
 ```
 
 只写当前用户 hive（`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`），
-**无需管理员**。当前应用**没有** `--start-minimized` 命令行开关（"最小化启动"
-是 `%APPDATA%\LanguageInput\config.json` 里的持久设置），因此启动项写的是
-不带参数的 exe 路径。
+**无需管理员**。启动项带 `--start-minimized`，登录后只显示托盘，不弹出设置窗口。
+统一安装包提供所有用户的开机启动选项。开始菜单、安装完成页和小狼毫托盘
+的主动打开入口使用 `--show`，覆盖 `%APPDATA%\LanguageInput\config.json`
+里的最小化偏好，确保窗口显示。
 
 ### 卸载 / Uninstall
 

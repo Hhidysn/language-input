@@ -62,6 +62,14 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
   hRes = _Module.Init(NULL, hInstance);
   ATLASSERT(SUCCEEDED(hRes));
 
+  // Opening settings must not go through the server restart path below.
+  if (!wcscmp(L"/settings", lpstrCmdLine)) {
+    const bool opened = WeaselServerApp::open_settings();
+    _Module.Term();
+    ::CoUninitialize();
+    return opened ? 0 : 1;
+  }
+
   if (!wcscmp(L"/userdir", lpstrCmdLine)) {
     CreateDirectory(WeaselUserDataPath().c_str(), NULL);
     WeaselServerApp::explore(WeaselUserDataPath());

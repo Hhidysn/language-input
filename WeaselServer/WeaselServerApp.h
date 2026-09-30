@@ -17,6 +17,8 @@ namespace fs = std::filesystem;
 
 class WeaselServerApp {
  public:
+  static bool open_settings();
+
   static bool execute(const fs::path& cmd, const std::wstring& args) {
     return (uintptr_t)ShellExecuteW(NULL, NULL, cmd.c_str(), args.c_str(), NULL,
                                     SW_SHOWNORMAL) > 32;

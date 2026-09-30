@@ -53,7 +53,7 @@ langInput/
 
 GitHub Actions 的 [Package Language Input](.github/workflows/release-ci.yml) 可以手动运行：在仓库的 Actions 页选择该工作流，点 **Run workflow** 并选 `main`。完成后从该次运行的 **Artifacts** 下载 `LanguageInput-…-Windows`；里面有单个安装程序、SHA256 校验和及说明。创建并推送 `v1.0.0` 这类标签会自动构建，并建立待审核的 GitHub Release 草稿；确认安装包后再发布草稿。
 
-**一个安装包包含小狼毫输入法、按需启动的本地翻译宿主和设置应用。** 设置应用在开始菜单中有入口，安装时也可选择是否让它开机最小化到托盘。QuickMT 模型权重不在安装包里，安装后从设置界面下载或导入。
+**一个安装包包含小狼毫输入法、按需启动的本地翻译宿主和设置应用。** 安装完成页默认勾选“打开 Language Input 设置”，开始菜单和小狼毫托盘的“输入法设定”也可打开新版设置。安装时可选择是否让设置应用开机最小化到托盘。QuickMT 模型权重不在安装包里，安装后从设置界面下载或导入。
 
 **引擎**需要 Visual Studio（C++ 桌面）+ CMake + Boost；**模型宿主/设置应用**需要 Python 3.11。
 
@@ -77,6 +77,8 @@ git -C librime apply ../patches/librime-sensitive-mode.patch   # 2. 打引擎补
   **按需拉起**，空闲 **600 秒**自动退出 —— **不需要常驻、不需要开机自启**。
   QuickMT 热请求 9 候选 p95 为 39–207ms；首次冷请求仍可能超过 1 秒（详见 `language-input/MODEL.zh-CN.md`）。
 - **设置应用**：安装包中的 `settings\LanguageInputSettings.exe`（开始菜单，或托盘图标 → 设置窗口）
+  - 若没有设置托盘图标，从开始菜单搜索 **Language Input 设置**；设置应用启动后才会出现它的托盘图标。
+  - 小狼毫托盘默认显示；用户若在 `weasel.custom.yaml` 中设了 `patch: {"style/display_tray_icon": false}`，仍会隐藏小狼毫图标。此项与 GitHub 构建 YAML 中的 `false` 无关。
   - ⚠️ 首次运行 Windows 会把新托盘图标放进**溢出区**（点任务栏 `^` 才看得到），需手动拖到任务栏固定
   - 可选开机自启：`settings-app\packaging\autostart.ps1 -Enable`
 - **引擎二进制替换**（改了 C++ 之后）：`tools\engine\apply-weaselserver.ps1`（备份 + 提权替换 + 重启）

@@ -62,6 +62,9 @@ RequestExecutionLevel admin
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "$(OPENLANGUAGEINPUTSETTINGS)"
+!define MUI_FINISHPAGE_RUN_FUNCTION OpenLanguageInputSettings
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -87,6 +90,8 @@ LangString LNKFORSETUP ${LANG_TRADCHINESE} "【小狼毫】安裝選項"
 LangString LNKFORUNINSTALL ${LANG_TRADCHINESE} "卸載小狼毫"
 LangString LNKFORMODELS ${LANG_TRADCHINESE} "Language Input AI 語言包管理"
 LangString LNKFORLANGUAGEINPUTSETTINGS ${LANG_TRADCHINESE} "Language Input 設置"
+LangString OPENLANGUAGEINPUTSETTINGS ${LANG_TRADCHINESE} "開啟 Language Input 設置"
+LangString SETTINGSSTARTFAILED ${LANG_TRADCHINESE} "未能開啟設置。請從開始功能表開啟「Language Input 設置」。"
 LangString CONFIRMATION ${LANG_TRADCHINESE} "安裝前，請先卸載舊版本的小狼毫。$\n$\n按下「確定」移除舊版本，按下「取消」放棄本次安裝。"
 LangString SYSTEMVERSIONNOTOK ${LANG_TRADCHINESE} "您的系统不被支持，最低系統要求:Windows 8.1!"
 LangString AUTOCHKUPDATE ${LANG_TRADCHINESE} "自動檢查版本更新？"
@@ -106,6 +111,8 @@ LangString LNKFORSETUP ${LANG_SIMPCHINESE} "【小狼毫】安装选项"
 LangString LNKFORUNINSTALL ${LANG_SIMPCHINESE} "卸载小狼毫"
 LangString LNKFORMODELS ${LANG_SIMPCHINESE} "Language Input AI 语言包管理"
 LangString LNKFORLANGUAGEINPUTSETTINGS ${LANG_SIMPCHINESE} "Language Input 设置"
+LangString OPENLANGUAGEINPUTSETTINGS ${LANG_SIMPCHINESE} "打开 Language Input 设置"
+LangString SETTINGSSTARTFAILED ${LANG_SIMPCHINESE} "未能打开设置。请从开始菜单打开“Language Input 设置”。"
 LangString CONFIRMATION ${LANG_SIMPCHINESE} '安装前，请先卸载旧版本的小狼毫。$\n$\n点击 "确定" 移除旧版本，或点击 "取消" 放弃本次安装。'
 LangString SYSTEMVERSIONNOTOK ${LANG_SIMPCHINESE} "您的系統不被支持，最低系统要求:Windows 8.1!"
 LangString AUTOCHKUPDATE ${LANG_SIMPCHINESE} "自动检查版本更新？"
@@ -125,11 +132,24 @@ LangString LNKFORSETUP ${LANG_ENGLISH} "Weasel Installation Preference"
 LangString LNKFORUNINSTALL ${LANG_ENGLISH} "Uninstall Weasel"
 LangString LNKFORMODELS ${LANG_ENGLISH} "Language Input AI Language Packs"
 LangString LNKFORLANGUAGEINPUTSETTINGS ${LANG_ENGLISH} "Language Input Settings"
+LangString OPENLANGUAGEINPUTSETTINGS ${LANG_ENGLISH} "Open Language Input Settings"
+LangString SETTINGSSTARTFAILED ${LANG_ENGLISH} "Could not open settings. Open Language Input Settings from the Start menu."
 LangString CONFIRMATION ${LANG_ENGLISH} "Before installation, please uninstall the old version of Weasel.$\n$\nPress 'OK' to remove the old version, or 'Cancel' to abort installation."
 LangString SYSTEMVERSIONNOTOK ${LANG_ENGLISH} "Your system not supported, minimium system required: Windows 8.1!"
 LangString AUTOCHKUPDATE ${LANG_ENGLISH} "Automatically check for updates?"
 
 ;--------------------------------
+
+Function OpenLanguageInputSettings
+  ; /settings delegates to the desktop shell, so the app uses the logged-in
+  ; user's profile even if UAC elevated this installer as another account.
+  ClearErrors
+  ExecWait '"$INSTDIR\WeaselServer.exe" /settings' $1
+  ${If} ${Errors}
+  ${OrIf} $1 != 0
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$(SETTINGSSTARTFAILED)"
+  ${EndIf}
+FunctionEnd
 
 Function .onInit
   ; if not version >= 8.1, quit and MessageBox(if not silent)
@@ -442,7 +462,7 @@ Section "Start Menu Shortcuts"
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORAPPFOLDER).lnk" "$INSTDIR\WeaselServer.exe" "/weaseldir" "$SYSDIR\shell32.dll" 19
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUPDATER).lnk" "$INSTDIR\WeaselServer.exe" "/update" "$SYSDIR\shell32.dll" 13
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORSETUP).lnk" "$INSTDIR\WeaselSetup.exe" "" "$SYSDIR\shell32.dll" 162
-  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORLANGUAGEINPUTSETTINGS).lnk" "$INSTDIR\settings\LanguageInputSettings.exe"
+  CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORLANGUAGEINPUTSETTINGS).lnk" "$INSTDIR\settings\LanguageInputSettings.exe" "--show"
   CreateShortCut "$SMPROGRAMS\$(DISPLAYNAME)\$(LNKFORUNINSTALL).lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
 
 SectionEnd

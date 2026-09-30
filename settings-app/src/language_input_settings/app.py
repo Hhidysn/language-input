@@ -5,15 +5,17 @@ Entry point (:func:`main`) supports:
 * ``--selftest``: strictly read-only with respect to the user's Rime data; it
   only creates/reads/deletes files inside a private temp directory.  It never
   creates a ``QApplication``.
-* ``--gui-smoke``: create a ``QApplication``, build the main window (all seven
-  pages) and the system-tray icon, process pending events, then tear everything
-  down without entering the event loop.  A construction check.
+* ``--gui-smoke``: create a ``QApplication``, build all seven pages and the
+  tray icon, check minimized startup and explicit opening, then tear down
+  without entering the event loop.
 * ``--gui-shot <out_dir>``: build the window, show it, and save one PNG per page
   (``01-overview.png`` … ``07-about.png``) with ``QWidget.grab()``; then exit.
 * ``--version``: print the app version.
 * ``--start-minimized``: start hidden in the system tray (no window).  The
   persisted ``config.start_minimized`` setting is honoured too, so the
   autostart entry can pass the flag.
+* ``--show``: always show the settings window, including when the saved
+  preference is to start minimized (used by shortcuts and the installer).
 * no arguments: launch the PySide6 tray application.
 
 GUI stack is **PySide6 (Qt for Python)** (design doc §6 / decision #13): the
@@ -4445,7 +4447,7 @@ if _HAS_QT:
             self._app.processEvents()
 
 
-def run_gui(*, start_minimized: bool = False) -> int:
+def run_gui(*, start_minimized: bool = False, show: bool = False) -> int:
     if not _HAS_QT:
         print(
             f"error: PySide6 is required for the GUI ({_QT_IMPORT_ERROR}). "
@@ -4466,7 +4468,9 @@ def run_gui(*, start_minimized: bool = False) -> int:
     # Honour both the explicit ``--start-minimized`` flag (used by the
     # autostart entry) and the persisted ``config.start_minimized`` setting.
     minimize_on_start = start_minimized
-    if not minimize_on_start:
+    if show:
+        minimize_on_start = False
+    elif not minimize_on_start:
         try:
             minimize_on_start = bool(appconfig.load_config().start_minimized)
         except Exception:  # pragma: no cover - defensive
@@ -4480,8 +4484,8 @@ def run_gui(*, start_minimized: bool = False) -> int:
 def run_gui_smoke() -> int:
     """Construct the window, all seven pages and the tray icon, then exit.
 
-    Creates a ``QApplication`` and processes pending events, but never enters
-    the event loop, never shows the window and never writes anywhere.
+    Checks tray-only startup and opening the window, processes pending events,
+    then exits without entering the event loop or changing the user's settings.
     """
     if not _HAS_QT:
         print(
@@ -4510,6 +4514,15 @@ def run_gui_smoke() -> int:
             raise RuntimeError("tray context menu is empty")
         if controller.tray.icon().isNull():
             raise RuntimeError("tray icon is null (assets/icon.ico missing?)")
+
+        controller.start(minimized=True)
+        app.processEvents()
+        if not controller.tray.isVisible() or controller.window.isVisible():
+            raise RuntimeError("minimized startup did not keep a tray-only app")
+        controller.show_window()
+        app.processEvents()
+        if not controller.window.isVisible():
+            raise RuntimeError("explicit settings launch did not show the window")
 
         app.processEvents()
         print("gui_smoke: passed")
@@ -4624,10 +4637,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print the application version and exit",
     )
-    parser.add_argument(
+    startup = parser.add_mutually_exclusive_group()
+    startup.add_argument(
         "--start-minimized",
         action="store_true",
         help="start hidden in the system tray (used by the autostart entry)",
+    )
+    startup.add_argument(
+        "--show",
+        action="store_true",
+        help="always show settings, overriding the saved minimized preference",
     )
 
     # Model management (M3).  Imported lazily so --selftest stays independent.
@@ -4651,7 +4670,7 @@ def main(argv: list[str] | None = None) -> int:
     if handled is not None:
         return handled
 
-    return run_gui(start_minimized=bool(args.start_minimized))
+    return run_gui(start_minimized=bool(args.start_minimized), show=bool(args.show))
 
 
 if __name__ == "__main__":  # pragma: no cover
